@@ -1,5 +1,5 @@
 import glob, os, importlib
-import functions as fc
+from mouse_imaging import functions as fc
 from mouse_imaging import sess, tmaze
 import numpy as np
 import scipy.io

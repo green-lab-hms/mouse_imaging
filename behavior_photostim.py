@@ -1,7 +1,7 @@
 import os, glob
 import pandas as pd
 from mouse_imaging import *
-import functions as fc
+from mouse_imaging import functions as fc
 
 import scipy.io
 import numpy as np

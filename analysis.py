@@ -2,7 +2,7 @@ import itertools
 import pandas as pd
 import numpy as np
 from numpy import pi
-import functions as fc
+from mouse_imaging import functions as fc
 import igraph, umap
 from sklearn.neighbors import kneighbors_graph
 from sklearn.preprocessing import StandardScaler

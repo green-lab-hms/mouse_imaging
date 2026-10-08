@@ -10,7 +10,7 @@ from scipy.interpolate import interp1d
 
 from mouse_imaging.session import maze_id, unpack_var_name, fetch_cell_stat
 import mouse_imaging.analysis as an
-import functions as fc
+from mouse_imaging import functions as fc
 
 from anndata._core.anndata import AnnData
 
@@ -22,13 +22,13 @@ import os
 import textwrap
 import itertools
 
-from tifffile import imread, imsave
+from tifffile import imread, imwrite
 from scipy.io import loadmat, savemat
 
 importlib.reload(an)
 importlib.reload(fc)
 
-current_cmap = copy.copy(mpl.cm.get_cmap())
+current_cmap = copy.copy(mpl.colormaps[mpl.rcParams["image.cmap"]])
 current_cmap.set_bad(color='grey')
 
 # Palettes
@@ -1427,7 +1427,7 @@ def plot_clustermap(adata, col_color='celltype'):
         sr = adata.var[col_color]
         sr = (sr - sr.min()) / (sr.max() - sr.min())
         unique_vals = sr.unique()
-        palette = cm.get_cmap('Blues')
+        palette = mpl.colormaps['Blues']
         lut = dict(zip(unique_vals, palette(unique_vals)))
         col_colors = sr.map(lut)
     else:
@@ -1562,7 +1562,7 @@ def imshow_raw_alignment(adata, start_ind=10, end_ind=-10, vmax=0.02, figsize=(4
     plt.imshow(img/vmax)
     show_targets(adata, group=1, color='white')
     save_file = os.path.join(adata.uns['path']['preprocessed_dir'], '2P', 'raw_alignment.tif')
-    imsave(save_file, img)
+    imwrite(save_file, img)
 
 def show_targets(adata, group=1, color='white', arrow=(10, 10), offset=(-5, -5), width=0.01, head_width=4, annotate_target='nearest_source'):
     # Show targets
@@ -1861,7 +1861,7 @@ def generate_correlation_image_plane(adata, var_key=None, show=False, save=True,
     if save:
         index = meanref_file.find('.tif')
         save_file = meanref_file[:index] + '_varcorr.tif'
-        imsave(save_file, img)
+        imwrite(save_file, img)
     return img
 
 def generate_correlation_images(adata, var_key=None, show=False, save=True, meanref_ichan=1, corr_ichan=0):

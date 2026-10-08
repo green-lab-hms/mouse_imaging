@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-import functions as fc
+from mouse_imaging import functions as fc
 import scipy.interpolate
 import time
 import mouse_imaging.behavior as behavior

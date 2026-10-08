@@ -1,7 +1,7 @@
 import os, warnings
 import numpy as np
 import pandas as pd
-import functions as fc
+from mouse_imaging import functions as fc
 import mouse_imaging.analysis as an
 import mouse_imaging.session as sess
 import scipy.stats

@@ -9,7 +9,7 @@ import scipy.ndimage
 from tifffile import imread
 from ScanImageTiffReader import ScanImageTiffReader
 
-import functions as fc
+from mouse_imaging import functions as fc
 from mouse_imaging import options
 
 import matplotlib.pyplot as plt
