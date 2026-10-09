@@ -129,18 +129,19 @@ On a new cluster, also check the `#SBATCH` lines at the top of `preprocess.slurm
 Each session is one AnnData object. Rows are **imaging volumes** (time points) and columns are **cells**:
 
 ```
-                                 adata.var  (one row per cell)
-                                 plane, x, y, G, R, iscell, iscell_prob, redcell, redcell_prob, ...
-                                 ┌────────────────┬────────────────┬─────┬────────────────┐
-                                 │ plane0_source0 │ plane0_source1 │ ... │ plane2_source9 │
-              ┌──────────────────┼────────────────┴────────────────┴─────┴────────────────┤
- adata.obs    │ t=48.17 y=25.0   │                                                        │
- (one row per │ t=48.30 y=34.3   │   adata.X              deconvolved activity (spks)     │
- imaging      │ t=48.44 y=41.7   │   adata.layers['dcnv'] same as X                       │
- volume):     │   ...            │   adata.layers['dF']   dF/F                            │
- time and     │ t, dt, y, dy,    │                                                        │
- behavior     │ trial, lick, ... │   shape: n_volumes × n_cells                           │
- (ViRMEn)     └──────────────────┴────────────────────────────────────────────────────────┘
+                     adata.var  (one row per cell)
+                     plane, x, y, G, R, iscell, iscell_prob, redcell, redcell_prob, ...
+                    ┌────────────────┬────────────────┬─────┬────────────────┐
+                    │ plane0_source0 │ plane0_source1 │ ... │ plane2_source9 │ adata.obs (behavior)
+         ┌──────────┼────────────────┴────────────────┴─────┴────────────────┼──────────────────────┐
+  time   │ t=48.17  │                                                        │ y=25.0  dy=0.9  ...  │
+   │     │ t=48.30  │   adata.X              deconvolved activity (spks)     │ y=34.3  dy=1.1  ...  │
+   │     │ t=48.44  │   adata.layers['dcnv'] same as X                       │ y=41.7  dy=0.8  ...  │
+   │     │   ...    │   adata.layers['dF']   dF/F                            │   ...                │
+   │     │          │                                                        │ trial, lick, reward, │
+   ▼     │          │   shape: n_volumes × n_cells                           │ ... (from ViRMEn)    │
+         └──────────┴────────────────────────────────────────────────────────┴──────────────────────┘
+          one row per imaging volume; t (s) and the behavior columns are both in adata.obs
 
  adata.uns   metadata  ScanImage header + mouse, date, session, region, maze, nslices, volume_rate, ...
              ops       options used to build the session (paths, suite2p setting overrides, ...)
