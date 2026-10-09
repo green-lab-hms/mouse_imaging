@@ -144,7 +144,12 @@ def check_tifs(files, mouse, date, session):
         last = config.get_path('raw_root') / 'twophoton' / mouse / date / session / names[-1]
         try:
             with tifffile.TiffFile(last) as tif:
-                tif.pages[-1]  # reads through the page list to the end of the file
+                page = tif.pages[-1]  # reads through the page list to the end of the file
+                data_end = max(o + n for o, n in zip(page.dataoffsets, page.databytecounts))
+            if data_end > sizes[-1]:
+                # Usually MATLAB/ScanImage crashed during the recording, so the file was never finished (TODO: work around this)
+                problems.append(f'The last TIFF ({names[-1]}) is cut off: its last frame ends {data_end - sizes[-1]:,} bytes past the end of the file, '
+                                'probably because MATLAB crashed during the recording')
         except Exception as e:
             problems.append(f'The last TIFF ({names[-1]}) cannot be read: {type(e).__name__}')
     return problems

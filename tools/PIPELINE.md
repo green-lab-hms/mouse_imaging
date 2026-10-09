@@ -121,6 +121,6 @@ state_dir = "/path/to/state"   # default: <derived_root>/.pipeline
 ## Troubleshooting
 
 - **A session stays "Uploading":** files are still changing, or the folder was copied in several passes. The status turns ready about 30–40 minutes after the last change.
-- **"TIFF problem: The last TIFF cannot be read":** the last file ends mid-frame. This happens if the copy was interrupted, so re-copy it if possible. If the acquisition itself was cut short, **Process anyway**.
+- **"TIFF problem: The last TIFF is cut off" or "cannot be read":** the last file ends mid-frame. This is usually because MATLAB (ScanImage) crashed during the recording, as in JG6/261002 and JG6/261003, so the file was never finished. It can also happen if a copy was interrupted; then re-copy it. **Process anyway** may still fail if suite2p can't read the last file. **To do:** find a way to handle these automatically, e.g. drop the incomplete last frame or volume (or the whole last file) before suite2p.
 - **A job failed:** open its **Log** link. After fixing the cause, click **Retry**.
 - **Nothing is being submitted:** check `~/.config/mouse_imaging/pipeline_cron.log` for errors, and that the cron line exists with `crontab -l`.
