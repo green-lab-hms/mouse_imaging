@@ -12,7 +12,8 @@ A session is ready when:
       last TIFF can be read
 Ready sessions recorded on or after `auto_start_date` are submitted automatically; earlier ones wait for a
 request from the dashboard (or `python -m mouse_imaging.pipeline queue <mouse> <date> <session>`).
-A session missing its ViRMEn file can be requested with force=True ("Process anyway").
+A session missing its ViRMEn file can be requested with force=True ("Process anyway"). Ignored sessions
+(dashboard "Ignore" button, or `pipeline ignore`) keep their status but are never queued automatically.
 
 Usage:
     python -m mouse_imaging.pipeline scan [--no-submit]      # check sessions, submit ready ones
@@ -225,6 +226,8 @@ def evaluate(entry, files, out, now, auto_start_date, quiet_minutes):
 
     if entry.get('request'):
         return 'queued', 'Requested from ' + entry['request'].get('by', 'dashboard') + (' (without ViRMEn)' if force else '')
+    if entry.get('ignored'):
+        return 'not_queued', 'Ignored, so not processed automatically'
     if entry['date'] >= auto_start_date:
         return 'queued', 'New session, queued automatically'
     return 'not_queued', f'Recorded before {format_date(auto_start_date)}, so not processed automatically'
@@ -293,14 +296,30 @@ def request(mouse, date, session, force=False, by='dashboard'):
             raise ValueError(f'{sid} is already {entry["status"]}.')
         entry.pop('job', None)  # forget a previous failed or finished job
         entry.pop('submit_error', None)
+        entry.pop('ignored', None)  # processing a session brings it back from the Ignored tab
         entry['request'] = {'time': time.time(), 'force': bool(force), 'by': by}
     # Rescan so the request is evaluated and submitted right away if a job slot is free
     return scan()['sessions'][sid]
 
+def set_ignored(mouse, date, session, ignored=True, by='dashboard'):
+    """Move a session to or from the dashboard's Ignored tab. Ignored sessions are not processed automatically."""
+    with locked_state() as state:
+        sid = session_id(mouse, date, session)
+        entry = state['sessions'].get(sid)
+        if entry is None:
+            raise KeyError(f'Unknown session {sid}; it has not been scanned yet.')
+        if ignored and entry.get('status') in ('running', 'pending'):
+            raise ValueError(f'{sid} is {entry["status"]}; wait for the job to finish before ignoring it.')
+        if ignored:
+            entry['ignored'] = {'time': time.time(), 'by': by}
+        else:
+            entry.pop('ignored', None)
+    return scan(submit_jobs=not ignored)['sessions'][sid]
+
 def status_table(state=None):
     import pandas as pd
     state = state or read_state()
-    rows = [{'session': sid, 'status': e.get('status'), 'detail': e.get('detail'), 'tifs': e.get('files', {}).get('n_tifs'),
+    rows = [{'session': sid, 'status': e.get('status'), 'ignored': bool(e.get('ignored')), 'detail': e.get('detail'), 'tifs': e.get('files', {}).get('n_tifs'),
              'virmen': e.get('files', {}).get('virmen'), 'sync': bool(e.get('files', {}).get('sync')),
              'qc_warnings': len((e.get('outputs', {}).get('qc') or {}).get('warnings', []))} for sid, e in sorted(state['sessions'].items())]
     return pd.DataFrame(rows)
@@ -315,6 +334,9 @@ if __name__ == '__main__':
     p_queue = sub.add_parser('queue', help='queue one session for preprocessing')
     p_queue.add_argument('mouse'); p_queue.add_argument('date'); p_queue.add_argument('session')
     p_queue.add_argument('--force', action='store_true', help='process even if the ViRMEn file is missing')
+    for name, help_text in [('ignore', 'move a session to the Ignored tab (never processed automatically)'), ('unignore', 'bring a session back from the Ignored tab')]:
+        p = sub.add_parser(name, help=help_text)
+        p.add_argument('mouse'); p.add_argument('date'); p.add_argument('session')
     args = parser.parse_args()
     if args.command == 'scan':
         state = scan(submit_jobs=not args.no_submit, verbose=True)
@@ -326,3 +348,6 @@ if __name__ == '__main__':
     elif args.command == 'queue':
         entry = request(args.mouse, args.date, args.session, force=args.force, by='command line')
         print(entry['status'], '-', entry['detail'])
+    elif args.command in ('ignore', 'unignore'):
+        entry = set_ignored(args.mouse, args.date, args.session, ignored=args.command == 'ignore', by='command line')
+        print('ignored' if entry.get('ignored') else 'not ignored', '-', entry['status'], '-', entry['detail'])

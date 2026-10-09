@@ -34,6 +34,8 @@ Ready sessions recorded **on or after the auto-start date** are submitted automa
 | ○ Not queued | Ready, but recorded before the auto-start date | **Process** |
 | ✕ Failed | The SLURM job failed or couldn't be submitted | **Retry**; check the job's **Log** link |
 
+**Ignore** (under each session's button) moves a session to the small **Ignored** tab at the right, e.g. a test recording or one you'll never process. Ignored sessions keep updating their status but are never processed automatically, and they don't count in the status tiles. **Restore** brings one back. Running sessions can't be ignored.
+
 The **QC** column shows the cell and R+ counts, behavior time and QC flags from `qc_summary.json`, e.g. `z drift`, `R+ cells`, `suite2p log`. Hover over a flag to see the full warning. **QC report ↗** opens the PDF in a new tab.
 
 ## Open the dashboard
@@ -99,6 +101,7 @@ python -m mouse_imaging.pipeline scan --no-submit                # update the st
 python -m mouse_imaging.pipeline scan                            # what cron runs: update and submit ready sessions
 python -m mouse_imaging.pipeline queue JG6 260929 session_2      # same as the Process button
 python -m mouse_imaging.pipeline queue JG6 261005 session_1 --force   # Process anyway (no ViRMEn file, or a TIFF problem)
+python -m mouse_imaging.pipeline ignore JG1 260529 session_1     # same as the Ignore button; `unignore` restores it
 ```
 
 ## Settings

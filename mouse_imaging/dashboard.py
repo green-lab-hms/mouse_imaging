@@ -38,7 +38,7 @@ def status_json():
         qc = out.get('qc') or {}
         sessions.append({
             'id': sid, 'mouse': e['mouse'], 'date': e['date'], 'session': e['session'],
-            'status': e.get('status'), 'detail': e.get('detail'),
+            'status': e.get('status'), 'detail': e.get('detail'), 'ignored': bool(e.get('ignored')),
             'n_tifs': files.get('n_tifs', 0), 'tif_gb': round(files.get('tif_bytes', 0) / 1e9, 1),
             'virmen': files.get('virmen', False), 'sync': bool(files.get('sync')),
             'job': e.get('job'), 'has_log': bool(out.get('log')), 'qc_report': out.get('qc_report', False),
@@ -121,6 +121,10 @@ class Handler(BaseHTTPRequestHandler):
                 mouse, date, session = session_parts(body.get('id', '').split('/'))
                 entry = pipeline.request(mouse, date, session, force=bool(body.get('force')), by='dashboard')
                 return self._send(200, {'status': entry['status'], 'detail': entry['detail']})
+            if parts == ['api', 'ignore']:
+                mouse, date, session = session_parts(body.get('id', '').split('/'))
+                entry = pipeline.set_ignored(mouse, date, session, ignored=bool(body.get('ignored', True)), by='dashboard')
+                return self._send(200, {'status': entry['status'], 'detail': entry['detail'], 'ignored': bool(entry.get('ignored'))})
         except (KeyError, ValueError, RuntimeError) as e:
             return self._send(400, {'error': str(e)})
         self._send(404, {'error': 'not found'})
@@ -180,6 +184,7 @@ PAGE = r"""<!doctype html>
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--surface); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
 main { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
 header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; justify-content: space-between; }
@@ -217,6 +222,14 @@ td:first-child .small { white-space: nowrap; }
 .flag::before { content: "\26A0\FE0E  "; color: var(--warning); }
 .qcok { color: var(--good); font-size: 12px; font-weight: 600; }
 a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+.tabs { display: flex; align-items: flex-end; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 10px; color: var(--text-2); font-weight: 600; margin-bottom: -1px; }
+.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.tab.minor { margin-left: auto; font-size: 12px; font-weight: 500; }
+.tab .count { color: var(--text-3); font-weight: 500; margin-left: 4px; }
+.actions { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+button.ghost { background: none; border-color: transparent; color: var(--text-2); font-size: 12px; padding: 2px 6px; margin-left: -6px; }
+button.ghost:hover { color: var(--text); text-decoration: underline; }
 #msg { min-height: 20px; margin: 8px 0; font-size: 13px; }
 #msg.err { color: var(--critical); }
 @media (max-width: 640px) { main { padding: 16px; } h1 { font-size: 19px; } }
@@ -231,6 +244,10 @@ a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: un
     </div>
     <button class="primary" id="scan" title="Check all sessions now instead of waiting for the next scheduled scan">Scan now</button>
   </header>
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-tab="active" aria-selected="true">Sessions<span class="count" id="n-active"></span></button>
+    <button class="tab minor" role="tab" data-tab="ignored" aria-selected="false" title="Sessions you chose to ignore; they are not processed automatically">Ignored<span class="count" id="n-ignored"></span></button>
+  </div>
   <div class="tiles" id="tiles"></div>
   <div class="filters">
     <select id="mouse" aria-label="Mouse"><option value="">All mice</option></select>
@@ -258,7 +275,7 @@ const STATUS = {
   done:          {label: 'Done',            icon: '✓'},
 };
 const ORDER = Object.keys(STATUS);
-let data = null, statusFilter = '';
+let data = null, statusFilter = '', tab = 'active';
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const dateStr = d => `20${d.slice(0,2)}-${d.slice(2,4)}-${d.slice(4,6)}`;
@@ -290,35 +307,45 @@ function row(s) {
   }
   const job = s.job ? `<div class="num">${esc(s.job.id)}</div><div class="small">${esc((s.job.state || '').toLowerCase())}${s.job.elapsed ? ' · ' + esc(s.job.elapsed) : ''}</div>` : '<span class="muted">—</span>';
   const log = s.has_log ? `<div><a class="small" href="/log/${s.id}" target="_blank" rel="noopener">Log ↗</a></div>` : '';
-  const act = action(s);
-  const btn = act ? `<button data-id="${esc(s.id)}" data-force="${act[1]}" data-confirm="${esc(act[2] || '')}">${act[0]}</button>` : '';
+  const act = s.ignored ? null : action(s);
+  const btn = act ? `<button data-op="queue" data-id="${esc(s.id)}" data-force="${act[1]}" data-confirm="${esc(act[2] || '')}">${act[0]}</button>` : '';
+  const busy = s.status === 'running' || s.status === 'pending';
+  const ign = s.ignored
+    ? `<button data-op="restore" data-id="${esc(s.id)}" title="Move back to the Sessions tab">Restore</button>`
+    : (busy ? '' : `<button class="ghost" data-op="ignore" data-id="${esc(s.id)}" title="Move to the Ignored tab; it won't be processed automatically">Ignore</button>`);
   return `<tr>
     <td><div class="sid">${esc(s.mouse)} <span class="muted">·</span> ${dateStr(s.date)}</div><div class="small">${esc(s.session)}</div></td>
     <td>${files}</td>
     <td><span class="badge s-${esc(s.status)}"><span class="i" aria-hidden="true">${st.icon}</span>${st.label}</span><div class="small">${esc(s.detail)}</div></td>
     <td>${qc}</td>
     <td>${job}${log}</td>
-    <td>${btn}</td></tr>`;
+    <td><div class="actions">${btn}${ign}</div></td></tr>`;
 }
 
 function render() {
   if (!data) return;
   const last = data.last_scan ? new Date(data.last_scan * 1000).toLocaleString() : 'never';
   $('meta').textContent = `Last scan ${last} · New sessions recorded on or after ${dateStr(data.auto_start_date)} are processed automatically · Up to ${data.max_concurrent_jobs} jobs at a time`;
+  const active = data.sessions.filter(s => !s.ignored), ignored = data.sessions.filter(s => s.ignored);
+  $('n-active').textContent = active.length; $('n-ignored').textContent = ignored.length;
+  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === tab));
+  const shown = tab === 'ignored' ? ignored : active;
   const counts = Object.fromEntries(ORDER.map(k => [k, 0]));
-  data.sessions.forEach(s => counts[s.status] = (counts[s.status] || 0) + 1);
-  const tiles = [['', 'All sessions', data.sessions.length], ...ORDER.filter(k => counts[k]).map(k => [k, STATUS[k].label, counts[k]])];
+  active.forEach(s => counts[s.status] = (counts[s.status] || 0) + 1);
+  const tiles = [['', 'All sessions', active.length], ...ORDER.filter(k => counts[k]).map(k => [k, STATUS[k].label, counts[k]])];
+  $('tiles').hidden = tab === 'ignored';
   $('tiles').innerHTML = tiles.map(([k, l, n]) => `<button class="tile" data-status="${k}" aria-pressed="${k === statusFilter}"><span class="n">${n}</span><span class="l">${l}</span></button>`).join('');
   const mice = [...new Set(data.sessions.map(s => s.mouse))].sort();
   const mouseSel = $('mouse'), cur = mouseSel.value;
   mouseSel.innerHTML = '<option value="">All mice</option>' + mice.map(m => `<option ${m === cur ? 'selected' : ''}>${esc(m)}</option>`).join('');
   const q = $('search').value.trim().toLowerCase(), flagged = $('flagged').checked;
-  const rows = data.sessions
-    .filter(s => (!statusFilter || s.status === statusFilter) && (!mouseSel.value || s.mouse === mouseSel.value))
+  const rows = shown
+    .filter(s => (tab === 'ignored' || !statusFilter || s.status === statusFilter) && (!mouseSel.value || s.mouse === mouseSel.value))
     .filter(s => !q || s.id.toLowerCase().includes(q) || dateStr(s.date).includes(q))
     .filter(s => !flagged || s.qc_warnings.length)
     .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
-  $('rows').innerHTML = rows.length ? rows.map(row).join('') : '<tr><td colspan="6" class="muted">No sessions match.</td></tr>';
+  const none = tab === 'ignored' && !ignored.length ? 'No ignored sessions. Use <b>Ignore</b> on a session to move it here.' : 'No sessions match.';
+  $('rows').innerHTML = rows.length ? rows.map(row).join('') : `<tr><td colspan="6" class="muted">${none}</td></tr>`;
 }
 
 async function load() {
@@ -332,16 +359,20 @@ function message(text, err) { const m = $('msg'); m.textContent = text; m.classN
 document.addEventListener('click', async ev => {
   const tile = ev.target.closest('.tile');
   if (tile) { statusFilter = tile.dataset.status === statusFilter ? '' : tile.dataset.status; render(); return; }
+  const t = ev.target.closest('.tab');
+  if (t) { tab = t.dataset.tab; render(); return; }
   const b = ev.target.closest('button[data-id]');
   if (!b) return;
   if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
-  b.disabled = true; message(`Submitting ${b.dataset.id}…`);
+  const op = b.dataset.op, id = b.dataset.id;
+  b.disabled = true; message(op === 'queue' ? `Submitting ${id}…` : op === 'ignore' ? `Ignoring ${id}…` : `Restoring ${id}…`);
   try {
-    const r = await fetch('/api/queue', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({id: b.dataset.id, force: b.dataset.force === 'true'})});
+    const [url, body] = op === 'queue' ? ['/api/queue', {id, force: b.dataset.force === 'true'}] : ['/api/ignore', {id, ignored: op === 'ignore'}];
+    const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
     const res = await r.json(); if (!r.ok) throw new Error(res.error);
-    message(`${b.dataset.id}: ${STATUS[res.status]?.label || res.status}. ${res.detail}`);
-  } catch (e) { message(`${b.dataset.id}: ${e.message}`, true); }
+    message(op === 'queue' ? `${id}: ${STATUS[res.status]?.label || res.status}. ${res.detail}`
+      : op === 'ignore' ? `${id} moved to Ignored.` : `${id} restored: ${STATUS[res.status]?.label || res.status}.`);
+  } catch (e) { message(`${id}: ${e.message}`, true); }
   load();
 });
 $('scan').addEventListener('click', async () => {
