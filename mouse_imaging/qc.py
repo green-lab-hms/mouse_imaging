@@ -439,15 +439,16 @@ def _images_page(pdf, qc, npages):
         channels.append(('meanImg_chan2', 'R (channel 2)'))
     fig = plt.figure(figsize=PAGE)
     _header(fig, qc, 'Mean images', 3, npages)
-    fig.text(0.06, 0.905, 'Registered mean image of each plane and channel, scaled from the 1st to the 99.5th percentile.',
-             fontsize=7.5, color=STYLE['text_secondary'])
+    fig.text(0.06, 0.898, 'Registered mean image of each plane and channel. Each channel uses one scale for all planes,\n'
+             'from the 1st to the 99.9th percentile of its pixels across planes.', fontsize=7.5, color=STYLE['text_secondary'])
+    lims = {key: _limits([tr[key] for tr in traces.values()]) for key, _ in channels}
     gs = fig.add_gridspec(nplanes, len(channels), left=0.1, right=0.9, top=0.87, bottom=0.05, hspace=0.12, wspace=0.05)
     for plane, tr in traces.items():
         for icol, (key, name) in enumerate(channels):
             ax = fig.add_subplot(gs[plane, icol])
             img = tr[key]
             if img is not None:
-                ax.imshow(img, cmap='gray', vmin=np.percentile(img, 1), vmax=np.percentile(img, 99.5), interpolation='nearest')
+                ax.imshow(img, cmap='gray', vmin=lims[key][0], vmax=lims[key][1], interpolation='nearest')
             ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
             for spine in ax.spines.values():
                 spine.set_visible(False)
