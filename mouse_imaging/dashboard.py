@@ -49,8 +49,9 @@ def status_json():
         sessions.append({
             'id': sid, 'mouse': e['mouse'], 'date': e['date'], 'session': e['session'],
             'status': e.get('status'), 'detail': e.get('detail'), 'ignored': bool(e.get('ignored')),
-            'n_tifs': files.get('n_tifs', 0), 'tif_gb': round(files.get('tif_bytes', 0) / 1e9, 1),
+            'n_tifs': files.get('n_tifs', 0), 'n_compressed': files.get('n_compressed', 0), 'tif_gb': round(files.get('tif_bytes', 0) / 1e9, 1),
             'virmen': files.get('virmen', False), 'sync': bool(files.get('sync')), 'filter_stacks': files.get('filter_stacks', {}),
+            'done_at': out.get('adata_time'),
             'job': e.get('job'), 'has_log': bool(out.get('log')), 'qc_report': out.get('qc_report', False), 'movie': out.get('movie', False),
             'qc_warnings': qc.get('warnings', []), 'n_cells': qc.get('n_cells'), 'n_red': qc.get('n_red'),
             'behavior_min': qc.get('behavior_min'),
@@ -150,7 +151,7 @@ def files_page(mouse, date, session):
     files = pipeline.check_files(mouse, date, session)
     entry = pipeline.read_state()['sessions'].get(pipeline.session_id(mouse, date, session), {})
     n = int(pipeline.SESSION_RE.match(session).group(1))
-    tif = lambda name: name.lower().endswith(('.tif', '.tiff'))
+    tif = lambda name: name.lower().endswith(('.tif', '.tiff', '.tif.zst', '.tiff.zst'))
     def check(ok, text):
         return f'<div class="status">{"<span class=ok>✓</span>" if ok else "<span class=no>✕</span>"} {text}</div>'
     two = raw / 'twophoton' / mouse / date / session
@@ -209,6 +210,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, PAGE, 'text/html; charset=utf-8', [cookie])
             if parts == ['api', 'status']:
                 return self._send(200, status_json())
+            if parts == ['api', 'delete_preview']:
+                mouse, date, session = session_parts(parse_qs(urlparse(self.path).query).get('id', [''])[0].split('/'))
+                tifs, sync = pipeline.raw_files_to_delete(mouse, date, session)
+                folders = sorted({str(f.parent) for f in tifs})
+                return self._send(200, {'n_tifs': len(tifs), 'tif_gb': round(sum(f.stat().st_size for f in tifs) / 1e9, 1),
+                                        'folders': folders, 'sync': [str(f) for f in sync]})
             if parts[0] in ('qc', 'log'):
                 mouse, date, session = session_parts(parts[1:])
                 out = pipeline.outputs(mouse, date, session)
@@ -277,6 +284,12 @@ class Handler(BaseHTTPRequestHandler):
                 mouse, date, session = session_parts(body.get('id', '').split('/'))
                 entry = pipeline.request(mouse, date, session, force=bool(body.get('force')), by='dashboard')
                 return self._send(200, {'status': entry['status'], 'detail': entry['detail']})
+            if parts == ['api', 'delete']:
+                sid = body.get('id', '')
+                if body.get('confirm') != sid:
+                    raise ValueError('Confirmation does not match the session name.')
+                entry, n_tifs, n_sync, nbytes = pipeline.delete_raw(*session_parts(sid.split('/')), by='dashboard')
+                return self._send(200, {'n_tifs': n_tifs, 'n_sync': n_sync, 'gb': round(nbytes / 1e9, 1), 'status': entry['status']})
             if parts == ['api', 'ignore']:
                 mouse, date, session = session_parts(body.get('id', '').split('/'))
                 entry = pipeline.set_ignored(mouse, date, session, ignored=bool(body.get('ignored', True)), by='dashboard')
@@ -445,6 +458,8 @@ a.detail .go { color: var(--accent); text-decoration: none; display: inline-bloc
 /* Job */
 .eta { color: var(--accent); white-space: nowrap; cursor: help; font-size: 12px; margin-top: 2px; }
 .actions { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+button.danger { border-color: color-mix(in srgb, var(--critical) 55%, transparent); color: var(--critical); background: var(--surface); }
+button.danger:hover { background: var(--critical-soft); }
 button.ghost { background: none; border-color: transparent; color: var(--text-3); font-size: 12px; padding: 0; font-weight: 500; }
 button.ghost:hover { color: var(--text); text-decoration: underline; background: none; }
 .empty { padding: 28px 14px; text-align: center; color: var(--text-3); }
@@ -468,6 +483,7 @@ button.ghost:hover { color: var(--text); text-decoration: underline; background:
   </header>
   <div class="tabs" role="tablist">
     <button class="tab" role="tab" data-tab="active" aria-selected="true">Sessions<span class="count" id="n-active"></span></button>
+    <button class="tab" role="tab" data-tab="archive" aria-selected="false" title="All processed sessions; the Sessions tab only shows done sessions processed in the last 7 days">Archive<span class="count" id="n-archive"></span></button>
     <button class="tab minor" role="tab" data-tab="ignored" aria-selected="false" title="Sessions you chose to ignore; they are not processed automatically">Ignored<span class="count" id="n-ignored"></span></button>
   </div>
   <div class="tiles" id="tiles"></div>
@@ -529,7 +545,7 @@ function etaText(s) {
 function row(s) {
   const st = STATUS[s.status] || {label: s.status, icon: '?'};
   const chip = (ok, label, extra, tip) => `<span class="chip ${ok ? 'ok' : 'no'}" title="${tip}"><b>${ok ? '✓' : '✕'}</b>${label}${extra ? ` <span class="dim">${extra}</span>` : ''}</span>`;
-  const files = `<div class="chips">${chip(s.n_tifs, 'TIFF', s.n_tifs ? `${s.n_tifs} · ${s.tif_gb} GB` : '', 'ScanImage TIFFs')}${
+  const files = `<div class="chips">${chip(s.n_tifs, 'TIFF', s.n_tifs ? `${s.n_tifs} · ${s.tif_gb} GB${s.n_compressed ? (s.n_compressed === s.n_tifs ? ' · zst' : ` · ${s.n_compressed} zst`) : ''}` : '', s.n_compressed ? 'ScanImage TIFFs, losslessly compressed to .tif.zst after processing' : 'ScanImage TIFFs')}${
       chip(s.virmen, 'ViRMEn', '', 'ViRMEn sessionData.mat')}${chip(s.sync, 'Sync', '', 'Sync file')}</div>${
       Object.keys(s.filter_stacks || {}).length ? `<div class="extra" title="Extra stacks in filter* subfolders, motion-corrected by the filters step">+ ${Object.keys(s.filter_stacks).map(esc).join(', ')}</div>` : ''}`;
   let qc = '<span class="muted">—</span>';
@@ -549,13 +565,14 @@ function row(s) {
   const btn = act ? `<button class="act" data-op="queue" data-id="${esc(s.id)}" data-force="${act[1]}" data-confirm="${esc(act[2] || '')}">${act[0]}</button>` : '';
   const busy = s.status === 'running' || s.status === 'pending';
   const ign = s.ignored
-    ? `<button data-op="restore" data-id="${esc(s.id)}" title="Move back to the Sessions tab">Restore</button>`
+    ? `<button data-op="restore" data-id="${esc(s.id)}" title="Move back to the Sessions tab">Restore</button>${
+       (s.n_tifs || s.sync) ? `<button class="danger" data-op="delete" data-id="${esc(s.id)}" title="Permanently delete this session's TIFFs and sync file">Delete TIFFs/Sync</button>` : ''}`
     : (busy ? '' : `<button class="ghost" data-op="ignore" data-id="${esc(s.id)}" title="Move to the Ignored tab; it won't be processed automatically">Ignore</button>`);
   return `<tr>
     <td><div class="sid">${esc(s.mouse)}<span class="date">${dateStr(s.date)}</span></div><div class="small">${esc(s.session)}</div></td>
     <td>${files}</td>
     <td><span class="pill c-${esc(s.status)}"><span class="i" aria-hidden="true">${st.icon}</span>${st.label}</span>${
-      PROBLEM.has(s.status) ? `<a class="detail" href="/files/${s.id}" target="_blank" rel="noopener" title="Open the list of files in this session's folders">${esc(s.detail)}<span class="go">↗</span></a>` : `<div class="detail">${esc(s.detail)}</div>`}</td>
+      PROBLEM.has(s.status) ? `<a class="detail" href="/files/${s.id}" target="_blank" rel="noopener" title="Open the list of files in this session's folders">${esc(s.detail)}<span class="go">↗</span></a>` : `<div class="detail">${esc(s.detail)}${s.status === 'done' && s.done_at ? ` · ${new Date(s.done_at * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}` : ''}</div>`}</td>
     <td>${qc}</td>
     <td>${job}${eta}${log}</td>
     <td><div class="actions">${btn}${ign}</div></td></tr>`;
@@ -565,25 +582,31 @@ function render() {
   if (!data) return;
   $('meta').textContent = `New sessions recorded on or after ${dateStr(data.auto_start_date)} are processed automatically · up to ${data.max_concurrent_jobs} jobs at a time`;
   showLastScan();
-  const active = data.sessions.filter(s => !s.ignored), ignored = data.sessions.filter(s => s.ignored);
-  $('n-active').textContent = active.length; $('n-ignored').textContent = ignored.length;
+  // Sessions: everything not ignored, except done sessions processed more than a week ago; Archive: all done sessions
+  const weekAgo = Date.now() / 1000 - 7 * 86400;
+  const recent = s => s.status !== 'done' || (s.done_at || 0) >= weekAgo;
+  const active = data.sessions.filter(s => !s.ignored && recent(s)), ignored = data.sessions.filter(s => s.ignored);
+  const archive = data.sessions.filter(s => !s.ignored && s.status === 'done');
+  $('n-active').textContent = active.length; $('n-ignored').textContent = ignored.length; $('n-archive').textContent = archive.length;
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === tab));
-  const shown = tab === 'ignored' ? ignored : active;
+  const shown = tab === 'ignored' ? ignored : tab === 'archive' ? archive : active;
   const counts = Object.fromEntries(ORDER.map(k => [k, 0]));
   active.forEach(s => counts[s.status] = (counts[s.status] || 0) + 1);
-  const tiles = [['', 'All sessions', active.length], ...ORDER.filter(k => counts[k]).map(k => [k, STATUS[k].label, counts[k]])];
-  $('tiles').hidden = tab === 'ignored';
+  const tiles = [['', 'All sessions', active.length], ...ORDER.filter(k => counts[k]).map(k => [k, k === 'done' ? 'Done this week' : STATUS[k].label, counts[k]])];
+  $('tiles').hidden = tab !== 'active';
   $('tiles').innerHTML = tiles.map(([k, l, n]) => `<button class="tile" data-status="${k}" aria-pressed="${k === statusFilter}"><span class="ic c-${k || 'all'}" aria-hidden="true">${k ? STATUS[k].icon : '≡'}</span><span class="n">${n}</span><span class="l">${l}</span></button>`).join('');
   const mice = [...new Set(data.sessions.map(s => s.mouse))].sort();
   const mouseSel = $('mouse'), cur = mouseSel.value;
   mouseSel.innerHTML = '<option value="">All mice</option>' + mice.map(m => `<option ${m === cur ? 'selected' : ''}>${esc(m)}</option>`).join('');
   const q = $('search').value.trim().toLowerCase(), flagged = $('flagged').checked;
   const rows = shown
-    .filter(s => (tab === 'ignored' || !statusFilter || s.status === statusFilter) && (!mouseSel.value || s.mouse === mouseSel.value))
+    .filter(s => (tab !== 'active' || !statusFilter || s.status === statusFilter) && (!mouseSel.value || s.mouse === mouseSel.value))
     .filter(s => !q || s.id.toLowerCase().includes(q) || dateStr(s.date).includes(q))
     .filter(s => !flagged || s.qc_warnings.length)
-    .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
-  const none = tab === 'ignored' && !ignored.length ? 'No ignored sessions. Use <b>Ignore</b> on a session to move it here.' : 'No sessions match.';
+    .sort(tab === 'archive' ? (a, b) => (b.done_at || 0) - (a.done_at || 0) || a.id.localeCompare(b.id)
+                            : (a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || b.date.localeCompare(a.date) || a.id.localeCompare(b.id));
+  const none = tab === 'ignored' && !ignored.length ? 'No ignored sessions. Use <b>Ignore</b> on a session to move it here.'
+    : tab === 'archive' && !archive.length ? 'No processed sessions yet.' : 'No sessions match.';
   $('rows').innerHTML = rows.length ? rows.map(row).join('') : `<tr><td colspan="6" class="empty">${none}</td></tr>`;
 }
 
@@ -592,6 +615,21 @@ async function load() {
     const r = await fetch('/api/status'); if (!r.ok) throw new Error(await r.text());
     data = await r.json(); render();
   } catch (e) { message('Could not load status: ' + e.message, true); }
+}
+async function deleteRaw(b, id) {
+  try {
+    const r = await fetch('/api/delete_preview?id=' + encodeURIComponent(id)); const p = await r.json(); if (!r.ok) throw new Error(p.error);
+    const what = [`${p.n_tifs} TIFF files (${p.tif_gb} GB) in:\n  ${p.folders.join('\n  ') || '(none)'}`,
+                  `Sync file: ${p.sync.join(', ') || '(none)'}`].join('\n\n');
+    const typed = prompt(`Permanently delete these files of ${id}?\n\n${what}\n\nViRMEn files and preprocessing output are kept. This can't be undone.\n\nType ${id} to confirm:`);
+    if (typed === null) return;
+    if (typed.trim() !== id) { message(`Not deleted: the name typed doesn't match ${id}.`, true); return; }
+    b.disabled = true; message(`Deleting files of ${id}…`);
+    const d = await fetch('/api/delete', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id, confirm: typed.trim()})});
+    const res = await d.json(); if (!d.ok) throw new Error(res.error);
+    message(`${id}: deleted ${res.n_tifs} TIFFs and ${res.n_sync} sync file(s), ${res.gb} GB.`);
+  } catch (e) { message(`${id}: ${e.message}`, true); }
+  load();
 }
 function ago(t) {
   const m = Math.round((Date.now() / 1000 - t) / 60);
@@ -614,6 +652,7 @@ document.addEventListener('click', async ev => {
   if (!b) return;
   if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
   const op = b.dataset.op, id = b.dataset.id;
+  if (op === 'delete') return deleteRaw(b, id);
   b.disabled = true; message(op === 'queue' ? `Submitting ${id}…` : op === 'ignore' ? `Ignoring ${id}…` : `Restoring ${id}…`);
   try {
     const [url, body] = op === 'queue' ? ['/api/queue', {id, force: b.dataset.force === 'true'}] : ['/api/ignore', {id, ignored: op === 'ignore'}];

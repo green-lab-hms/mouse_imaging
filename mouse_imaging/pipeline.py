@@ -100,9 +100,11 @@ def _files(directory, pattern):
 def check_files(mouse, date, session):
     """Presence, size and modification time of the session's TIFF, ViRMEn and sync files."""
     raw_root = config.get_path('raw_root')
-    is_tif = lambda n: n.lower().endswith(('.tif', '.tiff'))
+    # .tif, or .tif.zst after the compress step (compress.py)
+    is_tif = lambda n: n.lower().endswith(('.tif', '.tiff', '.tif.zst', '.tiff.zst'))
     session_dir = raw_root / 'twophoton' / mouse / date / session
     tifs = sorted(_files(session_dir, is_tif))
+    plain = [(name, st) for name, st in tifs if not name.endswith('.zst')]
     # filter* subfolders (e.g. filter2, filter1_1024) are part of the upload too
     try:
         filter_dirs = sorted(e.path for e in os.scandir(session_dir) if e.is_dir() and e.name.startswith('filter'))
@@ -115,11 +117,12 @@ def check_files(mouse, date, session):
     all_files = tifs + virmen + sync + filter_tifs
     return {
         'n_tifs': len(tifs),
+        'n_compressed': len(tifs) - len(plain),
         'tif_bytes': sum(st.st_size for _, st in tifs),
         'filter_stacks': {os.path.basename(d): len(_files(d, is_tif)) for d in filter_dirs},
         'filter_bytes': sum(st.st_size for _, st in filter_tifs),
-        'tif_names': [name for name, _ in tifs],
-        'tif_sizes': [st.st_size for _, st in tifs],
+        'tif_names': [name for name, _ in plain],  # uncompressed only, for check_tifs
+        'tif_sizes': [st.st_size for _, st in plain],
         'virmen': bool(virmen),
         'sync': sync[0][0] if sync else None,
         'last_modified': max((st.st_mtime for _, st in all_files), default=None),
@@ -164,6 +167,7 @@ def outputs(mouse, date, session):
     return {
         'derived_dir': str(derived),
         'adata': (derived / 'adata.h5ad').exists(),
+        'adata_time': (derived / 'adata.h5ad').stat().st_mtime if (derived / 'adata.h5ad').exists() else None,  # when it was processed
         'qc_report': (derived / 'qc_report.pdf').exists(),
         'movie': (derived / 'movie.mp4').exists(),
         'qc': qc,
@@ -310,7 +314,7 @@ def scan(submit_jobs=True, verbose=False):
                 entry['tif_checked_snapshot'] = files['snapshot']
             status, detail = evaluate(entry, files, out, now, state['auto_start_date'], s['quiet_minutes'])
             entry.update(snapshot=files['snapshot'], status=status, detail=detail, checked=now,
-                         files={k: files[k] for k in ['n_tifs', 'tif_bytes', 'filter_stacks', 'filter_bytes', 'virmen', 'sync', 'last_modified']},
+                         files={k: files[k] for k in ['n_tifs', 'n_compressed', 'tif_bytes', 'filter_stacks', 'filter_bytes', 'virmen', 'sync', 'last_modified']},
                          outputs=out)
 
         if submit_jobs:
@@ -370,6 +374,44 @@ def set_ignored(mouse, date, session, ignored=True, by='dashboard'):
         else:
             entry.pop('ignored', None)
     return scan(submit_jobs=not ignored)['sessions'][sid]
+
+def raw_files_to_delete(mouse, date, session):
+    """The ignored session's TIFFs (.tif/.tif.zst, in the session folder and its subfolders) and its sync file(s)."""
+    from mouse_imaging import compress
+    raw_root = config.get_path('raw_root')
+    tifs = [f for d in compress.session_dirs(raw_root / 'twophoton' / mouse / date / session)
+            for f in sorted(d.iterdir()) if f.is_file() and (compress.is_tif(f.name) or compress.is_compressed_tif(f.name))]
+    n = int(SESSION_RE.match(session).group(1))
+    sync_dir = raw_root / 'sync' / mouse / date
+    sync = sorted(f for f in sync_dir.glob(f'session_{n:03d}.*') if f.is_file()) if sync_dir.is_dir() else []
+    return tifs, sync
+
+def delete_raw(mouse, date, session, by='dashboard'):
+    """
+    Permanently delete an ignored session's TIFFs and sync file (not ViRMEn, derived output or other files).
+    Only for sessions in the Ignored tab with no running job. Each deletion is logged to <state_dir>/deletions.log.
+    """
+    sid = session_id(mouse, date, session)
+    with locked_state() as state:
+        entry = state['sessions'].get(sid)
+        if entry is None:
+            raise KeyError(f'Unknown session {sid}.')
+        if not entry.get('ignored'):
+            raise ValueError(f'{sid} is not ignored; only sessions in the Ignored tab can have their files deleted.')
+        if entry.get('status') in ('running', 'pending'):
+            raise ValueError(f'{sid} has a {entry["status"]} job.')
+        tifs, sync = raw_files_to_delete(mouse, date, session)
+        files = tifs + sync
+        nbytes = sum(f.stat().st_size for f in files)
+        deleted = []
+        for f in files:
+            f.unlink()
+            deleted.append(str(f))
+        with open(Path(settings()['state_dir']) / 'deletions.log', 'a') as fh:
+            fh.write(json.dumps({'time': time.strftime('%Y-%m-%d %H:%M:%S'), 'by': by, 'user': os.environ.get('USER'),
+                                 'session': sid, 'bytes': nbytes, 'files': deleted}) + '\n')
+    print(f'Deleted {len(tifs)} TIFFs and {len(sync)} sync file(s) of {sid} ({nbytes / 1e9:.1f} GB)')
+    return scan(submit_jobs=False)['sessions'][sid], len(tifs), len(sync), nbytes
 
 def status_table(state=None):
     import pandas as pd

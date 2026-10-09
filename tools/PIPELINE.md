@@ -34,7 +34,11 @@ Ready sessions recorded **on or after the auto-start date** are submitted automa
 | ○ Not queued | Ready, but recorded before the auto-start date | **Process** |
 | ✕ Failed | The SLURM job failed or couldn't be submitted | **Retry**; check the job's **Log** link |
 
-**Ignore** (under each session's button) moves a session to the small **Ignored** tab at the right, e.g. a test recording or one you'll never process. Ignored sessions keep updating their status but are never processed automatically, and they don't count in the status tiles. **Restore** brings one back. Running sessions can't be ignored.
+The **Sessions** tab shows done sessions only if they were processed in the last 7 days; **Archive** lists every processed session, newest first.
+
+After a session is processed, its raw TIFFs are losslessly compressed to `.tif.zst` (about 57% of the size; the Files column shows `· zst`). Reprocessing decompresses them automatically. To open one yourself: `zstd -d file.tif.zst` (or `python -c "from mouse_imaging import compress; compress.decompress_file('file.tif.zst')"`).
+
+**Ignore** (under each session's button) moves a session to the small **Ignored** tab at the right, e.g. a test recording or one you'll never process. Ignored sessions keep updating their status but are never processed automatically, and they don't count in the status tiles. **Restore** brings one back. Running sessions can't be ignored. In the Ignored tab, **Delete TIFFs/Sync** permanently deletes the session's TIFFs (session folder and subfolders, compressed or not) and its sync file, after you type the session name to confirm. ViRMEn files, preprocessing output and other files are kept. Deletions are logged to `<derived_root>/.pipeline/deletions.log`.
 
 The **Job** column estimates how long processing takes: time left and expected finish time for a running job, and total time for other sessions. The estimate comes from the TIFF size and how long finished jobs took per GB, so it improves as more sessions are processed. Two jobs running at once can each take longer.
 
