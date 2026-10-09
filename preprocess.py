@@ -2,7 +2,7 @@ import suite2p
 from suite2p.run_s2p import logger_setup
 from mouse_imaging import *
 
-STEPS = ['suite2p', 'session']
+STEPS = ['suite2p', 'anndata']
 
 def suite2p_settings(overrides):
     """
@@ -54,7 +54,7 @@ def main(mouse, date, session='session_1', ops_name='default_ops', steps=STEPS):
         run_suite2p(path, md, ops)
 
     # Step 2: align suite2p output with sync and virmen data, and save as anndata
-    if 'session' in steps:
+    if 'anndata' in steps:
         sess.main(mouse, date, session, ops=ops)
 
 if __name__ == '__main__':

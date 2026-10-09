@@ -10,7 +10,9 @@ The code was originally written for the HMS O2 cluster (`/n/data2/...`, `/n/scra
 
 ## Environment and running
 
-- Conda env: `mouse_imaging`, at `~/.conda/envs/mouse_imaging`. It uses suite2p 1.1 and torch. `~/code` is on the env's path through a `.pth` file, so the package imports as `mouse_imaging` from anywhere. The repo directory itself has to be named `mouse_imaging`.
+- Conda env: `mouse_imaging`, at `~/.conda/envs/mouse_imaging`, with suite2p 1.1 and torch. The package is installed in editable mode (`pip install -e .`), so code changes take effect without reinstalling.
+- Install: `conda env create -f environment.yml` creates the env and runs `pip install -e .[suite2p,notebook]`. Into an existing env, run `pip install -e .` (core) or `pip install -e ".[suite2p]"` (preprocessing). Dependencies are in `pyproject.toml`.
+- The repo root *is* the package: `pyproject.toml` maps it with `package-dir = {"mouse_imaging" = "."}` instead of using a `src/` layout. A regular (non-editable) `pip install .` or `pip wheel .` fails when run inside the repo on the network share (`Directory not empty` when cleaning up `build/`); build from a copy on local disk if you need a wheel.
 - Activate on spinoza: `source /molbio/hpc/apps/miniforge3/etc/profile.d/conda.sh && conda activate mouse_imaging`
 - Cluster: SLURM, a single node `spinoza` (partition `defq`, 96 CPUs, about 250 GB RAM, **no GPU**, so suite2p/cellpose run with `torch_device='cpu'`).
 - There are no tests, linter or build step. To check your changes, import the module and run the relevant script:
@@ -22,10 +24,12 @@ The code was originally written for the HMS O2 cluster (`/n/data2/...`, `/n/scra
 
 | Command | What it does |
 |---|---|
-| `sbatch preprocess.slurm <mouse> <date> [session] [steps]` | Runs `preprocess.py`: step `suite2p` (all planes together), then step `session` (builds the `Session` and AnnData and saves `adata.h5ad`). `steps` is comma-separated and defaults to `suite2p,session`; pass `session` to rebuild the AnnData without rerunning suite2p. The log goes to `preprocess_<jobid>.log` in the directory you submit from. |
-| `python preprocess.py --mouse M --date D --steps session` | The same as above for step 2 only, run directly. It takes a few minutes, so it doesn't need SLURM. |
+| `sbatch preprocess.slurm <mouse> <date> [session] [steps]` | Runs `preprocess.py`: step `suite2p` (all planes together), then step `anndata` (builds the `Session` and AnnData and saves `adata.h5ad`). `steps` is comma-separated and defaults to `suite2p,anndata`; pass `anndata` to rebuild the AnnData without rerunning suite2p. The log goes to `preprocess_<jobid>.log` in the directory you submit from. |
+| `python -m mouse_imaging.preprocess --mouse M --date D --steps anndata` | The same as above for step 2 only, run directly. It takes a few minutes, so it doesn't need SLURM. The SLURM script uses this module form too, so it works without a clone. |
 | `python session.py --mouse M --date D --update` | Re-runs `update_function` (photostim influence, tuning, regressions) on an existing `adata.h5ad`. |
 | `sbatch plot_animation.slurm ...` | Renders VR and activity movies (`plot_animation.py`). This file still uses the O2 conda path. |
+
+`README.md` is the user-facing guide: install routes, a pipeline diagram and the AnnData layout. `examples/example_session.ipynb` is an executed walkthrough on JG6/260929/session_1. Re-execute it after changing APIs it uses: `jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.kernel_name=mouse_imaging examples/example_session.ipynb`.
 
 ## Data layout
 

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mouse_imaging"
+version = "0.1.0"
+description = "Two-photon imaging and ViRMEn behavior preprocessing and analysis"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "pandas>=2",
+    "anndata>=0.10",
+    "matplotlib",
+    "matplotlib-inline",
+    "seaborn",
+    "tifffile",
+    "scanimage-tiff-reader",
+    "pyabf",
+    "h5py",
+    "igraph",
+    "umap-learn",
+    "scikit-learn",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+# Step 1 of preprocess.py (motion correction, ROI detection). Brings in torch.
+suite2p = ["suite2p>=1.1"]
+notebook = ["ipykernel"]
+
+[tool.setuptools]
+# The repository root is the mouse_imaging package itself
+packages = ["mouse_imaging"]
+package-dir = {"mouse_imaging" = "."}

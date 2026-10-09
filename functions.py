@@ -142,13 +142,12 @@ def fetch_index(df, key):
         return idx
 
     for keyi, vali in key.items():
+        # Compare as arrays, so mixing comparison and equality keys doesn't align on mismatched pandas indexes
+        arr = df.reset_index()[keyi].to_numpy() if keyi not in df.columns else df[keyi].to_numpy()
         if (type(vali) is str) and (vali[0] in ['<', '>', '=', '!']):
-            arr = df[keyi]
             idx &= eval('arr' + vali)
         else:
-            idx &= df.reset_index()[keyi] == vali
-    if isinstance(idx, pd.Series):
-        idx = idx.values
+            idx &= arr == vali
     return idx
     
 # Circular operations functions

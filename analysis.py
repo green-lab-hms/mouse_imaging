@@ -148,7 +148,7 @@ def _binX1(adata, obs, bins=20, layer='dcnv_norm', statistic=np.mean):
     assert obs is not None
     df = adata.to_df(layer=layer)
     df['cut'] = pd.cut(adata.obs[obs], bins=bins)
-    df_out = df.groupby('cut')[adata.var_names].apply(lambda x: statistic(x, axis=0))
+    df_out = df.groupby('cut', observed=False)[adata.var_names].apply(lambda x: statistic(x, axis=0))
     return df_out.T
 
 def binX1(adata, obs=None, bins=None, obs_key=None, var_key=None, norm=False):
@@ -221,7 +221,7 @@ def cell_tuning(adata, obs_col, obs_key=None, bins=20, min_delta=None, min_ratio
     # Compute binned df
     df = adata.to_df(layer=layer)
     df['cut'] = pd.cut(adata.obs[obs_col], bins=bins, ordered=True)
-    df_bin = df.groupby('cut')[adata.var_names].mean().T
+    df_bin = df.groupby('cut', observed=False)[adata.var_names].mean().T
     df_bin.columns = df['cut'].dtype.categories
     cell_bin = np.array(df_bin.columns.mid[np.argmax(df_bin.values, axis=1)])
 

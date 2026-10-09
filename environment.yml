@@ -1,0 +1,10 @@
+# Create with: conda env create -f environment.yml   (run from this directory)
+# Update with: conda env update -f environment.yml
+name: mouse_imaging
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -e .[suite2p,notebook]
