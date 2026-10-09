@@ -134,13 +134,13 @@ Each session is one AnnData object. Rows are **imaging volumes** (time points) a
                                  ┌────────────────┬────────────────┬─────┬────────────────┐
                                  │ plane0_source0 │ plane0_source1 │ ... │ plane2_source9 │
               ┌──────────────────┼────────────────┴────────────────┴─────┴────────────────┤
- adata.obs    │ t=48.17 y=25.0   │                                                         │
- (one row per │ t=48.30 y=34.3   │   adata.X              deconvolved activity (spks)      │
- imaging      │ t=48.44 y=41.7   │   adata.layers['dcnv'] same as X                        │
- volume):     │   ...            │   adata.layers['dF']   dF/F                             │
- time and     │ t, dt, y, dy,    │                                                         │
- behavior     │ trial, lick, ... │   shape: n_volumes × n_cells                            │
- (ViRMEn)     └──────────────────┴─────────────────────────────────────────────────────────┘
+ adata.obs    │ t=48.17 y=25.0   │                                                        │
+ (one row per │ t=48.30 y=34.3   │   adata.X              deconvolved activity (spks)     │
+ imaging      │ t=48.44 y=41.7   │   adata.layers['dcnv'] same as X                       │
+ volume):     │   ...            │   adata.layers['dF']   dF/F                            │
+ time and     │ t, dt, y, dy,    │                                                        │
+ behavior     │ trial, lick, ... │   shape: n_volumes × n_cells                           │
+ (ViRMEn)     └──────────────────┴────────────────────────────────────────────────────────┘
 
  adata.uns   metadata  ScanImage header + mouse, date, session, region, maze, nslices, volume_rate, ...
              ops       options used to build the session (paths, suite2p setting overrides, ...)
