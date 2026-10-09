@@ -134,12 +134,12 @@ def get_metadata(path, functional_filter='G', recompute=False, update=True):
 
         # Make some useful parameters more easily accessible
         metadata['nslices'] = int(metadata['SI.hStackManager.actualNumSlices'])
+        metadata['nflyback'] = int(metadata['SI.hFastZ.numDiscardFlybackFrames'])
         metadata['nchannels'] = n_saved_channels(metadata)
         metadata['Ly'] = int(metadata['SI.hRoiManager.linesPerFrame'])
         metadata['Lx'] = int(metadata['SI.hRoiManager.pixelsPerLine'])
         metadata['volume_rate'] = float(metadata['SI.hRoiManager.scanVolumeRate'])
         metadata['dt'] = 1. / metadata['volume_rate']
-        metadata['nflyback'] = int(metadata['SI.hFastZ.numDiscardFlybackFrames'])
         
         metadata['filter1'] = parse_si_filename(filter1_tif, functional_filter)
         metadata['region'] = metadata['filter1']['region']

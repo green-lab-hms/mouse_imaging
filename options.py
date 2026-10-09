@@ -39,32 +39,23 @@ def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
         ops['triggers'].extend(['ScanImage'])
 
         # suite2p
-        ops['suite2p_ops'] = {
-            'do_registration': False,
-            'nplanes': 1, # always set to 1 because running each plane independently
-            'nchannels': 1, # always set to 1 because feeding suite2p only one channel
-            'functional_chan': 1, # (1-based), only providing functional channel
-
-            'diameter': 10, # for cell detection
-            'spatial_scale_factor': 1/1.5, # for cell detection
-            'tau': 0.15, # for deconvolution
-            'do_bidiphase': False,
-            'num_workers': 0, # 0 to select num_cores, -1 to disable parallelism, N to enforce value
-            'num_workers_roi': 0, # 0 to select number of planes, -1 to disable parallelism, N to enforce value
-            'baseline': 'maximin', # baselining mode'
-            'delete_bin': True,
-        }
-
-        # Oasis
-        ops['baseline'] = 'maximin' 
-        ops['prctile_baseline'] = 8
-        ops['win_baseline'] = 60.0
-        ops['sig_baseline'] = 10.0
-        ops['neucoeff'] = 0.7
-        ops['tau_s'] = 0.80
-
-        ops['fov_microns'] = 680
-        ops['varcorr_key'] = None
+        import suite2p, torch # imported here so analysis-only environments don't need them
+        settings = suite2p.default_settings()
+        
+        settings['tau'] = 1.25 # timescale of gcamp to use for deconvolution
+        settings['torch_device'] = 'cuda' if torch.cuda.is_available() else 'cpu' # use GPU if available for faster processing
+        settings['diameter'] = [6, 6] # check
+        settings['run']['multiplane_parallel'] = True
+        settings['io']['delete_bin'] = True
+        settings['registration']['align_by_chan2'] = False
+        settings['registration']['do_bidiphase'] = True
+        settings['detection']['threshold_scaling'] = 2.0 # we are increasing the threshold for finding ROIs to limit the number of non-cell ROIs found (sometimes useful in gcamp injections)
+        settings['detection']['chan2_threshold'] = 0.25
+        settings['detection']['cellpose_chan2'] = True
+        settings['extraction']['neuropil_extract'] = True
+        settings['extraction']['neuropil_coefficient'] = 0.7
+        settings['dcnv_preprocess']['baseline'] = 'maximin'
+        ops['suite2p_settings'] = settings
 
         ops['do_corrmat'] = True
         ops['do_nneighbor_graph'] = True
@@ -73,22 +64,16 @@ def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
         
     # vr
     ops['is_vr_playback'] = False
-    ops['do_median_trajectory'] = True
+    ops['do_median_trajectory'] = False
     ops['virmen_mat_columns'] = ['world_id', 'dx', 'dy', 'dh', 'x', 'y', 'h_int', 'inITI', 'reward', 'dt', 'lick', 'trial']
     ops['sync_gains'] = {'Ball_pitc': -121 * ops['cm_per_virmen_unit'],
                 'Ball_roll': -1,
                 'Ball_yaw': -1,
                 'Reward': 1,}
 
-    ops['sync_offsets'] = {'Ball_pitc': 1.5,
-                    'Ball_roll': 1.5,
-                    'Ball_yaw': 1.5,
-                  'Reward': 0}
+    ops['sync_offsets'] = {'Reward': 0}
 
-    ops['sync_labels'] = {'Ball_pitc': 'pitch',
-                    'Ball_roll': 'roll',
-                    'Ball_yaw': 'yaw',
-                 'Reward': 'sync_reward'}
+    ops['sync_labels'] = {'Reward': 'sync_reward'}
     return ops
 
 import numpy as np
