@@ -1,4 +1,5 @@
 import glob, os, copy, json, warnings, subprocess, time, re, datetime
+from pathlib import Path
 
 import pandas as pd
 import numpy as np
@@ -68,10 +69,38 @@ def parse_si_filename(si_tif, functional_filter='G'):
         elif entry != 'session' and re.match('\D', entry) and 'region' not in metadata:
             metadata['region'] = entry # first non-numeric entry, e.g. V1 in 920nm_G1R1_V1_L123
 
+    # Order channels as ScanImage saves them: blue, then green, then red, whatever the order in the filename
+    # (e.g. 850nm_G1B2 is saved as channel 1 = B, channel 2 = G). No filter code in the filename gives no channels.
+    metadata['em_filters'] = sorted(metadata.get('em_filters', []), key=lambda f: 'BGR'.index(f[0]) if f[0] in 'BGR' else 3)
     metadata['channels'] = [em_filter[0] for em_filter in metadata['em_filters']]
     if functional_filter in metadata['channels']:
         metadata['functional_chan'] = metadata['channels'].index(functional_filter) + 1
 
+    return metadata
+
+def _n_saved_channels(metadata):
+    val = metadata['SI.hChannels.channelSave']
+    if isinstance(val, float):          # single channel, e.g. '1' -> 1.0
+        return 1
+    return len(val.strip('[]').replace(';', ' ').split())   # e.g. '[1;2]'
+
+def read_si_tif_metadata(si_tif, functional_filter='G'):
+    """
+    ScanImage header of one tif plus the derived keys used everywhere: nslices, nflyback, nchannels, Ly, Lx,
+    volume_rate, dt, zs (slice z positions, um) and 'filter1' (wavelength, channels, region parsed from the filename).
+    """
+    si_tif = str(si_tif)
+    metadata = parse_si_metadata(ScanImageTiffReader(si_tif).metadata())
+    metadata['nslices'] = int(metadata['SI.hStackManager.actualNumSlices'])
+    metadata['nflyback'] = int(metadata['SI.hFastZ.numDiscardFlybackFrames'])
+    metadata['nchannels'] = _n_saved_channels(metadata)
+    metadata['Ly'] = int(metadata['SI.hRoiManager.linesPerFrame'])
+    metadata['Lx'] = int(metadata['SI.hRoiManager.pixelsPerLine'])
+    metadata['volume_rate'] = float(metadata['SI.hRoiManager.scanVolumeRate'])
+    metadata['dt'] = 1. / metadata['volume_rate']
+    zs = metadata.get('SI.hStackManager.zs')
+    metadata['zs'] = [float(z) for z in str(zs).strip('[]').replace(';', ' ').split()] if zs is not None else []
+    metadata['filter1'] = parse_si_filename(si_tif, functional_filter)
     return metadata
 
 def get_metadata(path, functional_filter='G', recompute=False, update=True):
@@ -112,34 +141,11 @@ def get_metadata(path, functional_filter='G', recompute=False, update=True):
         #         if filterx in files[0]:
         #             return files[0]
 
-        def n_saved_channels(metadata):
-            val = metadata['SI.hChannels.channelSave']
-            if isinstance(val, float):          # single channel, e.g. '1' -> 1.0
-                return 1
-            return len(val.strip('[]').replace(';', ' ').split())   # e.g. '[1;2]'
-
-        
-        
-        metadata = {}
-        
         filter1_tif = str(path['raw_image1_tif'])
-        # Parse ScanImage metadata within tif file
-        img = ScanImageTiffReader(str(filter1_tif))
-        # metadata['scanimage_str'] = img.metadata()
-        metadata.update(parse_si_metadata(img.metadata()))
+        # Parse ScanImage metadata within tif file, plus nslices, nflyback, nchannels, Ly, Lx, volume_rate, zs, filter1
+        metadata = read_si_tif_metadata(filter1_tif, functional_filter)
         metadata.update(parse_si_path(filter1_tif))
         metadata['is_photostim'] = metadata['RoiGroups']['photostimRoiGroups'] is not None
-
-        # Make some useful parameters more easily accessible
-        metadata['nslices'] = int(metadata['SI.hStackManager.actualNumSlices'])
-        metadata['nflyback'] = int(metadata['SI.hFastZ.numDiscardFlybackFrames'])
-        metadata['nchannels'] = n_saved_channels(metadata)
-        metadata['Ly'] = int(metadata['SI.hRoiManager.linesPerFrame'])
-        metadata['Lx'] = int(metadata['SI.hRoiManager.pixelsPerLine'])
-        metadata['volume_rate'] = float(metadata['SI.hRoiManager.scanVolumeRate'])
-        metadata['dt'] = 1. / metadata['volume_rate']
-        
-        metadata['filter1'] = parse_si_filename(filter1_tif, functional_filter)
         metadata['region'] = metadata['filter1'].get('region')
         
         # Parse metadata from filter2, if present
@@ -217,6 +223,13 @@ def define_path(mouse=None, date=None, session='session_1', ops=None, makedir=Fa
         path['adata_allsources_h5ad'] = path['preprocessed_dir'] / f'adata_allsources.h5ad'
         
         path['var_pickle'] = path['preprocessed_dir'] / 'var.pickle'
+
+        # Extra stacks in filter* subfolders of the raw session, e.g. filter2 (blue and green at 850 nm) and filter1_1024
+        # (same filters as the session at 1024 x 1024). The filters step saves each one's registered mean images in
+        # <preprocessed_dir>/<name>/: mean.tif (planes x channels x Ly x Lx), metadata.json and suite2p/plane*/ops.npy
+        path['filter_raw_dirs'] = {d.name: d for d in sorted(path['twophoton_dir'].glob('filter*'))
+                                   if d.is_dir() and any(d.glob('*.tif'))}
+        path['filter_dirs'] = {name: path['preprocessed_dir'] / name for name in path['filter_raw_dirs']}
 
         # Suite2p output, one folder per plane (0-based). Format with plane=
         path['suite2p_dir'] = path['preprocessed_dir'] / 'suite2p'
@@ -903,8 +916,9 @@ class Session(object):
         t4 = time.perf_counter()
         print('Time to compute obs: %.2f s.' %(t4-t3))
 
-        # Load suite2p mean images to get channel intensities
+        # Load suite2p mean images to get channel intensities, and the filter* stacks aligned to them
         self.img = self._load_mean_imgs()
+        self.filter_img, self.uns['filters'] = self._load_filter_imgs()
 
         # Compute var df
         self.var = self._var(dilation=ops['dilation'])
@@ -1101,10 +1115,73 @@ class Session(object):
                 img[plane, ichannel] = ops_plane[key]
         return img
 
+    def _load_filter_imgs(self):
+        """
+        Registered mean images of the filter* stacks (from the filters step), aligned to the session's mean image.
+
+        Per plane, the stack's green image is aligned to the session's green image by a rigid shift (phase correlation).
+        Stacks with the session's frame size (e.g. filter2) are shifted into session coordinates, so cell masks can measure
+        them (get_img(..., filter_key=name)). Larger stacks (e.g. filter1_1024) are only compared after block-averaging to
+        the session's size, and their shift is recorded for later alignment (e.g. to MERFISH).
+        Returns ({name: array (nplanes, nchannels, Ly, Lx)}, {name: alignment info}).
+        """
+        import tifffile
+        md, path = self.uns['metadata'], self.uns['path']
+        imgs, info = {}, {}
+        g = md['filter1']['channels'].index('G') if 'G' in md['filter1']['channels'] else None
+        for name, out_dir in (path.get('filter_dirs') or {}).items():
+            mean_tif, md_json = Path(out_dir) / 'mean.tif', Path(out_dir) / 'metadata.json'
+            if not (mean_tif.exists() and md_json.exists()):
+                warnings.warn(f'No registered mean images for {name}; run the filters step.')
+                continue
+            try:
+                fmd = json.loads(md_json.read_text())
+                stack = tifffile.imread(mean_tif).astype(float).reshape(fmd['nslices'], len(fmd['channels']), fmd['Ly'], fmd['Lx'])
+            except Exception as e:
+                warnings.warn(f'Could not read the {name} mean images ({type(e).__name__}: {e}); skipping it.')
+                continue
+            if 'G' not in fmd['channels'] or 'G' not in md['filter1']['channels']:
+                warnings.warn(f"{name} has channels {fmd['channels']}; aligning to the session needs a green channel in both, so it is skipped.")
+                continue
+            if fmd['Ly'] % md['Ly'] or fmd['Lx'] % md['Lx'] or fmd['Ly'] // md['Ly'] != fmd['Lx'] // md['Lx']:
+                warnings.warn(f"{name} is {fmd['Ly']} x {fmd['Lx']}, not a whole multiple of the session's {md['Ly']} x {md['Lx']}; skipping it.")
+                continue
+            factor = fmd['Ly'] // md['Ly']
+            same_size = (fmd['Ly'], fmd['Lx']) == (md['Ly'], md['Lx'])
+            fg = fmd['channels'].index('G')
+            aligned = np.full((md['nslices'], len(fmd['channels']), md['Ly'], md['Lx']), np.nan)
+            shifts, corr_before, corr_after = [], [], []
+            for plane in range(min(md['nslices'], fmd['nslices'])):
+                ref = self.img[plane, g]
+                # compare at the session's resolution
+                small = [fc.downsample_img(stack[plane, c], factor) if factor > 1 else stack[plane, c] for c in range(len(fmd['channels']))]
+                shift = fc.rigid_shift(ref, small[fg])
+                ref_hp = fc.highpass_img(ref)
+                corr_before.append(fc.img_corr(ref_hp, fc.highpass_img(small[fg])))
+                corr_after.append(fc.img_corr(ref_hp, fc.shift_img(fc.highpass_img(small[fg]), shift)))
+                shifts.append(shift)
+                if same_size:
+                    for c in range(len(fmd['channels'])):
+                        aligned[plane, c] = fc.shift_img(small[c], shift)
+            z_offset = [round(zf - zs, 2) for zf, zs in zip(fmd.get('zs', []), md.get('zs', []))]
+            info[name] = {'channels': fmd['channels'], 'Ly': fmd['Ly'], 'Lx': fmd['Lx'], 'scale': factor,
+                          'shift_yx': shifts,  # per plane, in session pixels: shift the stack by this to match the session
+                          'corr_before': corr_before, 'corr_after': corr_after,  # high-passed green images vs the session's
+                          'z_offset_um': z_offset,  # stack z minus session z, per plane
+                          'used_for_var': same_size, 'n_volumes': fmd.get('n_volumes'), 'laser_nm': fmd.get('laser_nm')}
+            if same_size:
+                imgs[name] = aligned
+        return imgs, info
+
     def get_img(self, channel, plane, filter_key=None):
         """
-        Mean image of one channel ('G', 'R', ...) in one 0-based plane. filter_key is unused, kept for compatibility.
+        Mean image of one channel ('G', 'R', 'B', ...) in one 0-based plane, from the session or, with filter_key
+        (e.g. 'filter2'), from that filter* stack after alignment to the session.
         """
+        if filter_key:
+            channels = self.uns['filters'][filter_key]['channels']
+            assert channel in channels, f'{channel} not in {filter_key} channels {channels}'
+            return self.filter_img[filter_key][plane, channels.index(channel)]
         channels = self.uns['metadata']['filter1']['channels']
         assert channel in channels # check channel is present
         img = self.img[plane, channels.index(channel)]
@@ -1120,6 +1197,12 @@ class Session(object):
         # Compute intensity for each channel
         for channel in self.uns['metadata']['available_channels']:
             var[channel] = self._cell_means(channel, **dilation)
+        # Channels of filter* stacks with the session's frame size, measured with the same cell masks after alignment,
+        # e.g. filter2 gives 'B', and 'G_filter2' for the green channel the session already has
+        for name in getattr(self, 'filter_img', {}):
+            for channel in self.uns['filters'][name]['channels']:
+                key = channel if channel not in var else f'{channel}_{name}'
+                var[key] = self._cell_means(channel, filter_key=name, **dilation)
 
         var['isnotclipped'] = source_isnotclipped(self)
         var['isnotnearedge'] = source_isnotnearedge(self.stat, mindist=self.uns['ops']['min_dist_to_edge'])
@@ -1147,7 +1230,7 @@ class Session(object):
     def _cell_means(self, channel, cell_dilation=0, background_dilation=None, filter_key=None):  
         intensity = pd.Series(np.nan, index=self.X.columns)
         for icell in range(len(self.stat)):
-            cell = self._cell_mean(icell, channel, dilation=cell_dilation)
+            cell = self._cell_mean(icell, channel, dilation=cell_dilation, filter_key=filter_key)
             if background_dilation:
                 background = self._cell_mean(icell, channel, shell=background_dilation, filter_key=filter_key)
                 cell = cell - background

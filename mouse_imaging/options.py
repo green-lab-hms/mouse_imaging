@@ -71,6 +71,7 @@ def default_ops(imaging=True, env=None, maze=None): # env is the mouse_imaging m
             'max_regdx_px': 1.0, # suite2p residual motion after registration (regDX)
             'max_red_frac': 0.9, # fraction of cells called R+; above this the red cell threshold is suspect
             'max_volume_mismatch': 1, # sync vs suite2p volume count
+            'min_filter_corr': 0.3, # filter* stack vs session green image after alignment (high-passed); lower suggests another field of view or z plane
         }
 
     # vr

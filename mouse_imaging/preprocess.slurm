@@ -9,7 +9,7 @@
 #SBATCH -e preprocess_%j.log
 
 # Usage: sbatch preprocess.slurm <mouse> <date> [session] [steps]
-# steps: comma-separated, from suite2p,anndata,qc (default: all three)
+# steps: comma-separated, from suite2p,filters,anndata,qc (default: all four; filters is skipped if there are no filter* subfolders)
 if [ -z "$1" ] || [ -z "$2" ]; then
     echo "Usage: sbatch preprocess.slurm <mouse> <date> [session] [steps]"
     exit 1
@@ -18,7 +18,7 @@ fi
 mouse=$1
 date=$2
 session=${3:-session_1}
-steps=${4:-suite2p,anndata,qc}
+steps=${4:-suite2p,filters,anndata,qc}
 
 # Uses the conda on your PATH, which batch jobs inherit from the shell you submit from.
 # If conda isn't found in the job, set CONDA_BASE to your conda install: sbatch --export=ALL,CONDA_BASE=/path/to/miniforge3 ...

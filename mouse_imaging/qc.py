@@ -10,6 +10,7 @@ for registration problems and drift, using what suite2p saves per plane in ops.n
 plus each plane's fluorescence (F.npy), the suite2p log (run.log) and the sync check from the anndata step.
 """
 import re, json, time, textwrap
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.ndimage
@@ -184,6 +185,34 @@ def compute_qc(adata, ops=None):
     for message in suite2p_log_messages(str(path['suite2p_dir']) + '/run.log'):
         warn('suite2p log', f'suite2p log: {message}')
 
+    # filter* stacks (filters step): alignment to the session and z offset
+    filters, notes = _filter_qc(adata), []
+    # filter* stacks that were uploaded but are missing from the AnnData (filters step not run, failed, or skipped)
+    try:
+        raw_filters = list(sess.define_path(md['mouse'], md['date'], md['session'], ops=ops).get('filter_raw_dirs', {}))
+    except Exception:
+        raw_filters = []
+    missing = [name for name in raw_filters if name not in filters]
+    if missing:
+        warn('filter stacks', f"{', '.join(missing)} {'is' if len(missing) == 1 else 'are'} in the raw data but not in the AnnData. "
+                              "Run the filters and anndata steps; if it was already run, check the job log for that stack's error.")
+    for name, f in filters.items():
+        corr = np.array(f['corr_after'], dtype=float)
+        low = [p for p, c in enumerate(corr) if not np.isfinite(c) or c < thresh['min_filter_corr']]
+        if low:
+            listed = ', '.join(f'plane\u00a0{p}\u00a0({corr[p]:.2f})' for p in low)
+            warn('filter alignment', f"{name} matches the session image poorly after alignment in {listed} (correlation of "
+                                     f"high-passed green images, limit {thresh['min_filter_corr']}). Wrong field of view or z plane?")
+    # One note per z offset, naming every stack taken at it
+    by_offset = {}
+    for name, f in filters.items():
+        offsets = tuple(sorted(set(float(z) for z in f['z_offset_um'])))
+        if any(abs(z) > 0 for z in offsets):
+            by_offset.setdefault(offsets, []).append(name)
+    for offsets, names in by_offset.items():
+        notes.append(f"{' and '.join(names)} {'was' if len(names) == 1 else 'were'} taken {' / '.join(f'{z:+g}' for z in offsets)} µm "
+                     "in z from the session planes (ScanImage z positions); planes are matched one to one.")
+
     t = adata.obs['t'].to_numpy()
     imaging_min = planes['frames'].max() / fs / 60
     aligned_min = (t[-1] - t[0] + np.median(np.diff(t))) / 60
@@ -208,8 +237,39 @@ def compute_qc(adata, ops=None):
         'ROIs detected': f"{int(planes['rois_detected'].sum()):,}",
         'R+ cells': f'{n_red:,} ({red_frac:.0%} of selected cells)',
     }
+    if filters:
+        info['Filter stacks'] = ', '.join(f"{name} ({', '.join(f['channels'])}{', %d px' % f['Ly'] if f['Ly'] != md['Ly'] else ''})"
+                                          for name, f in filters.items())
     return dict(info=info, stats=stats, planes=planes, flags=flags, thresholds=thresh, warnings=warnings, warning_labels=warning_labels,
+                filters=filters, notes=notes, session_g=[tr['meanImg'] for tr in traces.values()],
                 traces=traces, n_cells=int(adata.n_vars), n_red=n_red, behavior_min=float(aligned_min), imaging_min=float(imaging_min))
+
+def _filter_qc(adata):
+    """Alignment info of each filter* stack from adata.uns['filters'], plus its mean images for the report."""
+    import tifffile
+    from mouse_imaging import functions as fc
+    out = {}
+    path = adata.uns['path']
+    for name, f in (adata.uns.get('filters') or {}).items():
+        f = {k: (v.tolist() if hasattr(v, 'tolist') else v) for k, v in f.items()}
+        f['shift_yx'] = [list(map(int, s)) for s in np.reshape(f.get('shift_yx', []), (-1, 2))]
+        for key in ['corr_before', 'corr_after', 'z_offset_um', 'channels']:
+            f[key] = list(np.atleast_1d(f.get(key, [])))
+        out_dir = Path(str((path.get('filter_dirs') or {}).get(name, Path(str(path['preprocessed_dir'])) / name)))
+        try:
+            fmd = json.loads((out_dir / 'metadata.json').read_text())
+            stack = tifffile.imread(out_dir / 'mean.tif').astype(float).reshape(fmd['nslices'], len(fmd['channels']), fmd['Ly'], fmd['Lx'])
+        except Exception as e:
+            print(f'QC: could not read the {name} mean images ({type(e).__name__}); showing its alignment only.')
+            f['images'] = {}
+            out[name] = f
+            continue
+        scale = int(f.get('scale', 1))
+        # Same-size stacks are shown shifted into session coordinates; larger ones at full resolution
+        f['images'] = {(plane, ch): (fc.shift_img(stack[plane, c], f['shift_yx'][plane]) if scale == 1 else stack[plane, c])
+                       for plane in range(len(f['shift_yx'])) for c, ch in enumerate(fmd['channels'])}
+        out[name] = f
+    return out
 
 # ---- Rendering ----
 
@@ -299,6 +359,16 @@ def _summary_page(pdf, qc, npages):
         if y < 0.05:
             fig.text(0.085, y, '(more warnings not shown)', fontsize=8, color=STYLE['text_secondary'])
             break
+    if qc.get('notes') and y > 0.1:
+        y -= 0.016
+        fig.text(0.06, y, 'Notes', fontsize=10, weight='bold')
+        y -= 0.026
+        for note in qc['notes']:
+            fig.text(0.062, y, '•', fontsize=10, color=STYLE['text_secondary'], weight='bold')
+            for line in textwrap.wrap(note, 110):
+                fig.text(0.085, y, line, fontsize=8)
+                y -= 0.017
+            y -= 0.006
     pdf.savefig(fig)
     plt.close(fig)
 
@@ -388,13 +458,76 @@ def _images_page(pdf, qc, npages):
     pdf.savefig(fig, dpi=200)
     plt.close(fig)
 
+def _limits(imgs, lo=1, hi=99.9):
+    """Display range shared by a set of images (e.g. all planes of one channel): percentiles of all their pixels."""
+    vals = np.concatenate([np.ravel(img) for img in imgs if img is not None])
+    vals = vals[np.isfinite(vals)]
+    return (np.percentile(vals, lo), np.percentile(vals, hi)) if len(vals) else (0, 1)
+
+def _show(ax, img, title=None, ylabel=None, lims=None):
+    if img is not None and np.isfinite(img).any():
+        vmin, vmax = lims if lims is not None else _limits([img])
+        ax.imshow(img, cmap='gray', vmin=vmin, vmax=vmax, interpolation='nearest')
+    ax.set_xticks([]); ax.set_yticks([]); ax.grid(False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    if title:
+        ax.set_title(title, fontsize=8.5)
+    if ylabel:
+        ax.set_ylabel(ylabel, fontsize=8, color=STYLE['text'])
+
+def _filters_page(pdf, qc, page, npages):
+    """Session green image next to each filter* stack's registered mean images, with alignment per plane."""
+    filters = qc['filters']
+    columns = [('Session G', None, 'G')] + [(f'{name} {ch}', name, ch) for name, f in filters.items() for ch in f['channels']
+                                             if not (f.get('scale', 1) > 1 and ch != 'G')]  # high-res stacks: green only
+    nplanes = len(qc['session_g'])
+    fig = plt.figure(figsize=PAGE)
+    _header(fig, qc, 'Filter stacks', page, npages)
+    fig.text(0.06, 0.898, 'Registered mean images; each column uses one scale for all planes (1st to 99.9th percentile).\n'
+             'Stacks with the session\'s frame size are shifted onto the session; high-resolution stacks are shown as acquired.',
+             fontsize=7.5, color=STYLE['text_secondary'])
+    gs = fig.add_gridspec(nplanes, len(columns), left=0.08, right=0.97, top=0.86, bottom=0.30, hspace=0.12, wspace=0.04)
+    get = lambda plane, name, ch: qc['session_g'][plane] if name is None else filters[name]['images'].get((plane, ch))
+    for icol, (title, name, ch) in enumerate(columns):
+        lims = _limits([get(plane, name, ch) for plane in range(nplanes)])
+        for plane in range(nplanes):
+            _show(fig.add_subplot(gs[plane, icol]), get(plane, name, ch), title if plane == 0 else None, f'Plane {plane}' if icol == 0 else None, lims)
+
+    # Alignment table
+    y = 0.255
+    fig.text(0.06, y, 'Alignment to the session (green channel, rigid)', fontsize=10, weight='bold')
+    y -= 0.028
+    cols = [0.06, 0.24, 0.36, 0.52, 0.68, 0.82]
+    for x, label in zip(cols, ['Stack', 'Plane', 'Shift (y, x)', 'Match before', 'Match after', 'z offset']):
+        fig.text(x, y, label, fontsize=8, weight='bold', color=STYLE['text_secondary'])
+    y -= 0.02
+    for name, f in filters.items():
+        for plane, shift in enumerate(f['shift_yx']):
+            low = not np.isfinite(f['corr_after'][plane]) or f['corr_after'][plane] < qc['thresholds']['min_filter_corr']
+            unit = 'px' if f.get('scale', 1) == 1 else f"px (at {qc['info']['Frame size'].split(' ')[0]} px)"
+            values = [name if plane == 0 else '', str(plane), f'{shift[0]:+d}, {shift[1]:+d} {unit}', f"{f['corr_before'][plane]:.2f}",
+                      f"{f['corr_after'][plane]:.2f}", f"{f['z_offset_um'][plane]:+g} µm" if plane < len(f['z_offset_um']) else '—']
+            for x, v in zip(cols, values):
+                fig.text(x, y, v, fontsize=8, weight='bold' if (low and x == cols[4]) else 'normal')
+            if low:
+                fig.text(cols[4] - 0.022, y, WARN_ICON, fontsize=8.5, color=STYLE['warning'], weight='bold')
+            y -= 0.017
+        y -= 0.006
+    fig.text(0.06, max(y, 0.02), f"Match: correlation of the high-passed green images (limit {qc['thresholds']['min_filter_corr']}).",
+             fontsize=7, color=STYLE['text_muted'])
+    pdf.savefig(fig, dpi=200)
+    plt.close(fig)
+
 def write_report(qc, filename):
-    npages = 3
+    npages = 4 if qc.get('filters') else 3
     with matplotlib.rc_context(RC):
         with PdfPages(filename) as pdf:
             _summary_page(pdf, qc, npages)
             _registration_page(pdf, qc, npages)
             _images_page(pdf, qc, npages)
+            if qc.get('filters'):
+                _filters_page(pdf, qc, 4, npages)
 
 def main(mouse, date, session='session_1', ops=None):
     """
@@ -412,7 +545,7 @@ def main(mouse, date, session='session_1', ops=None):
     # Machine-readable summary for the pipeline dashboard
     summary = {'warnings': [{'label': label, 'message': message} for label, message in zip(qc['warning_labels'], qc['warnings'])],
                'n_cells': qc['n_cells'], 'n_red': qc['n_red'], 'behavior_min': round(qc['behavior_min'], 2),
-               'imaging_min': round(qc['imaging_min'], 2), 'created': time.strftime('%Y-%m-%d %H:%M')}
+               'imaging_min': round(qc['imaging_min'], 2), 'notes': qc['notes'], 'created': time.strftime('%Y-%m-%d %H:%M')}
     with open(filename.replace('qc_report.pdf', 'qc_summary.json'), 'w') as fh:
         json.dump(summary, fh, indent=1)
     for warning in qc['warnings']:

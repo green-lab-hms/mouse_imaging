@@ -100,20 +100,30 @@ def _files(directory, pattern):
 def check_files(mouse, date, session):
     """Presence, size and modification time of the session's TIFF, ViRMEn and sync files."""
     raw_root = config.get_path('raw_root')
-    tifs = sorted(_files(raw_root / 'twophoton' / mouse / date / session, lambda n: n.lower().endswith(('.tif', '.tiff'))))
+    is_tif = lambda n: n.lower().endswith(('.tif', '.tiff'))
+    session_dir = raw_root / 'twophoton' / mouse / date / session
+    tifs = sorted(_files(session_dir, is_tif))
+    # filter* subfolders (e.g. filter2, filter1_1024) are part of the upload too
+    try:
+        filter_dirs = sorted(e.path for e in os.scandir(session_dir) if e.is_dir() and e.name.startswith('filter'))
+    except FileNotFoundError:
+        filter_dirs = []
+    filter_tifs = [f for d in filter_dirs for f in _files(d, is_tif)]
     virmen = _files(raw_root / 'virmen' / mouse / date / session, lambda n: n == 'sessionData.mat')
     session_number = int(SESSION_RE.match(session).group(1))
     sync = _files(raw_root / 'sync' / mouse / date, lambda n: n.startswith(f'session_{session_number:03d}.'))
-    all_files = tifs + virmen + sync
+    all_files = tifs + virmen + sync + filter_tifs
     return {
         'n_tifs': len(tifs),
         'tif_bytes': sum(st.st_size for _, st in tifs),
+        'filter_stacks': {os.path.basename(d): len(_files(d, is_tif)) for d in filter_dirs},
+        'filter_bytes': sum(st.st_size for _, st in filter_tifs),
         'tif_names': [name for name, _ in tifs],
         'tif_sizes': [st.st_size for _, st in tifs],
         'virmen': bool(virmen),
         'sync': sync[0][0] if sync else None,
         'last_modified': max((st.st_mtime for _, st in all_files), default=None),
-        'snapshot': [len(tifs), sum(st.st_size for _, st in all_files), len(all_files)],
+        'snapshot': [len(tifs), sum(st.st_size for _, st in all_files), len(all_files)],  # includes filter* stacks
     }
 
 def check_tifs(files, mouse, date, session):
@@ -188,7 +198,8 @@ def minutes_per_gb(state):
 
 def estimate(entry, state, now=None):
     """Expected processing time of a session and, for a running job, minutes left. None if no TIFFs."""
-    gb = entry.get('files', {}).get('tif_bytes', 0) / 1e9
+    files = entry.get('files', {})
+    gb = (files.get('tif_bytes', 0) + files.get('filter_bytes', 0)) / 1e9
     if not gb:
         return None
     total = max(3.0, minutes_per_gb(state) * gb)
@@ -278,7 +289,8 @@ def scan(submit_jobs=True, verbose=False):
                 job = entry['job']
                 # Remember how long finished jobs took, for the dashboard's time estimates
                 if job['state'] == 'COMPLETED' and not job.get('recorded') and entry.get('files', {}).get('tif_bytes'):
-                    history.append({'id': job['id'], 'gb': entry['files']['tif_bytes'] / 1e9, 'elapsed_s': job['elapsed_s']})
+                    gb = (entry['files']['tif_bytes'] + entry['files'].get('filter_bytes', 0)) / 1e9
+                    history.append({'id': job['id'], 'gb': gb, 'elapsed_s': job['elapsed_s']})
                     job['recorded'] = True
 
         for mouse, date, session in discover_sessions():
@@ -292,7 +304,7 @@ def scan(submit_jobs=True, verbose=False):
                 entry['tif_checked_snapshot'] = files['snapshot']
             status, detail = evaluate(entry, files, out, now, state['auto_start_date'], s['quiet_minutes'])
             entry.update(snapshot=files['snapshot'], status=status, detail=detail, checked=now,
-                         files={k: files[k] for k in ['n_tifs', 'tif_bytes', 'virmen', 'sync', 'last_modified']},
+                         files={k: files[k] for k in ['n_tifs', 'tif_bytes', 'filter_stacks', 'filter_bytes', 'virmen', 'sync', 'last_modified']},
                          outputs=out)
 
         if submit_jobs:

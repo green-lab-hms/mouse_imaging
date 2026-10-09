@@ -372,3 +372,39 @@ def to_h5ad_safe(obj):
         return str(obj)
     else:
         return obj
+
+def highpass_img(img, sigma=8):
+    """Image minus its Gaussian blur, which removes uneven illumination before comparing images."""
+    import scipy.ndimage
+    img = np.nan_to_num(np.asarray(img, dtype=float))
+    return img - scipy.ndimage.gaussian_filter(img, sigma)
+
+def img_corr(a, b):
+    """Pearson correlation of two images over the pixels where both are finite."""
+    ok = np.isfinite(a) & np.isfinite(b)
+    return float(np.corrcoef(a[ok], b[ok])[0, 1]) if ok.sum() > 2 else np.nan
+
+def rigid_shift(ref, img, sigma=8):
+    """
+    Integer (dy, dx) that aligns img to ref by phase correlation of the high-passed images:
+    scipy.ndimage.shift(img, (dy, dx)) lines up with ref.
+    """
+    f = np.fft.fft2(highpass_img(ref, sigma)) * np.conj(np.fft.fft2(highpass_img(img, sigma)))
+    r = np.fft.ifft2(f / (np.abs(f) + 1e-12)).real
+    dy, dx = np.unravel_index(np.argmax(r), r.shape)
+    dy = dy - r.shape[0] if dy > r.shape[0] // 2 else dy
+    dx = dx - r.shape[1] if dx > r.shape[1] // 2 else dx
+    return int(dy), int(dx)
+
+def shift_img(img, shift):
+    """Shift an image by integer (dy, dx); pixels shifted in from outside the field of view are NaN."""
+    dy, dx = shift
+    out = np.full(img.shape, np.nan)
+    Ly, Lx = img.shape
+    out[max(dy, 0):Ly + min(dy, 0), max(dx, 0):Lx + min(dx, 0)] = img[max(-dy, 0):Ly + min(-dy, 0), max(-dx, 0):Lx + min(-dx, 0)]
+    return out
+
+def downsample_img(img, factor):
+    """Average factor x factor pixel blocks, e.g. a 1024 x 1024 image to 512 x 512 with factor=2."""
+    Ly, Lx = img.shape[0] // factor * factor, img.shape[1] // factor * factor
+    return img[:Ly, :Lx].reshape(Ly // factor, factor, Lx // factor, factor).mean(axis=(1, 3))

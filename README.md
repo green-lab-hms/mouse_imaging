@@ -154,6 +154,7 @@ Each session is one AnnData object. Rows are **imaging volumes** (time points) a
 - **Behavior:** `obs` holds the behavioral data. Each ViRMEn variable (position `x`/`y`, heading `h`, velocity `dx`/`dy`/`dh`, `trial`, `inITI`, `reward`, `lick`, plus any extra `user0..N` channels) is resampled to the time of each imaging volume. The full-rate ViRMEn table is in `uns['vr']`.
 - **Time:** `obs['t']` is in seconds on the sync clock. Because volumes are ~7.5 Hz with 3 planes, each row is one volume, not one frame.
 - **Red and green brightness:** `var['G']` and `var['R']` are the mean brightness inside the cell minus the mean in a 2-pixel ring around it, measured on suite2p's registered mean image of each channel.
+- **Blue brightness:** if the session has a `filter2` stack, `var['B']` is measured the same way on its registered mean image, after a rigid shift that aligns its green channel to the session's (`var['G_filter2']` is its green channel). `uns['filters']` holds each stack's shift, alignment quality and z offset per plane. ScanImage saves blue first, then green, then red, whatever the order in the filename.
 - **Derived layers:** the `anndata` step also saves smoothed and normalized layers (`dcnv_0.25sigma`, `dcnv_norm`, `dcnv_0.25sigma_norm`; `sess.preprocess_activity`), and drops cells with no activity. Many analysis functions expect these.
 
 ## Usage
@@ -175,11 +176,12 @@ For example, `JG6 260929 session_2` reads:
 
 It writes to `<derived_root>/JG6/260929/session_2/`. Raw data has to be in this folder structure before preprocessing.
 
-Preprocessing has three steps, which can be run together or separately:
+Preprocessing has four steps, which can be run together or separately:
 
 | Step | Does | Output |
 |---|---|---|
 | `suite2p` | Motion correction, cell detection, fluorescence extraction and deconvolution. Slow: about 20 minutes on CPU for the 22-minute, 3-plane test session (JG6/260929). | `suite2p/plane0..N/` |
+| `filters` | Motion-corrects the extra stacks in `filter*` subfolders of the raw session, e.g. `filter2` (blue and green, 850 nm) and `filter1_1024` (the session's filters at 1024 × 1024), and saves their time-averaged images. Skipped if there are none. A few minutes. | `filter2/mean.tif`, `filter1_1024/mean.tif` |
 | `anndata` | Aligns suite2p output with behavior and sync, measures cell properties and saves the AnnData. About 1 minute. | `adata.h5ad` |
 | `qc` | Writes a QC report: session info, recording time, cell and R+ cell counts, registration and drift plots, and warnings. Seconds. | `qc_report.pdf` |
 
@@ -203,6 +205,7 @@ sbatch mouse_imaging/preprocess.slurm <mouse> <date> [session] [steps]
 sbatch mouse_imaging/preprocess.slurm JG6 260929              # all steps, session_1
 sbatch mouse_imaging/preprocess.slurm JG6 260929 session_2    # all steps, the day's second session
 sbatch mouse_imaging/preprocess.slurm JG6 260929 session_1 anndata,qc   # rebuild adata.h5ad and the QC report from existing suite2p output
+sbatch mouse_imaging/preprocess.slurm JG6 260929 session_2 filters,anndata,qc   # add the filter* stacks (e.g. blue) to a processed session
 ```
 
 The script runs `python -m mouse_imaging.preprocess`, which you can also call directly:

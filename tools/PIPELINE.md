@@ -7,7 +7,7 @@ New sessions are preprocessed automatically once their upload has finished. A cr
 The watcher looks at every `session_N` folder in `<raw_root>/twophoton/<mouse>/<date>/`. A session is **ready** when both of these hold.
 
 **1. All three file types are present:**
-- **ScanImage TIFFs:** `<raw_root>/twophoton/<mouse>/<date>/session_N/*.tif`
+- **ScanImage TIFFs:** `<raw_root>/twophoton/<mouse>/<date>/session_N/*.tif`. Stacks in `filter*` subfolders (e.g. `filter2`, `filter1_1024`) are optional, but count toward the upload check below, and the `filters` step processes them.
 - **ViRMEn:** `<raw_root>/virmen/<mouse>/<date>/session_N/sessionData.mat`
 - **Sync:** `<raw_root>/sync/<mouse>/<date>/session_00N.*`
 
