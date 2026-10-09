@@ -9,6 +9,8 @@ Preprocessing and analysis of two-photon calcium imaging in mice running virtual
 >
 > The usual way to use this package is from VS Code on your own computer, connected to spinoza through a tunnel. The guide goes step by step from a fresh account to running the example notebook:
 > setting up the environment → starting the tunnel (`sbatch tools/vscode.sh`) → connecting from VS Code → running [`examples/example_session.ipynb`](examples/example_session.ipynb).
+>
+> New sessions are **preprocessed automatically** after upload. Track them, and process older sessions, in the pipeline dashboard: [Automatic preprocessing and the dashboard](tools/PIPELINE.md).
 
 ## Installation
 
@@ -242,6 +244,7 @@ See [examples/example_session.ipynb](examples/example_session.ipynb) for a full 
 | `preprocess.py` | | Command-line pipeline: step 1 `suite2p`, step 2 `anndata`, step 3 `qc` |
 | `qc.py` | | QC report (`qc_report.pdf`, `qc_summary.json`): session summary, registration and drift checks |
 | `pipeline.py` | | Automatic preprocessing: finds new sessions, checks uploads are complete, submits jobs (run by cron) |
+| `dashboard.py` | | Web dashboard for the pipeline: session status, QC flags, process buttons |
 | `session.py` | `sess` | Paths, metadata, sync, `Session` assembly, loading AnnData |
 | `options.py` | | `default_ops()` settings, activity preprocessing, cell-type calling |
 | `analysis.py` | `an` | Binning, tuning, event-triggered activity, regression |
