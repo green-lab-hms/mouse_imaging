@@ -38,6 +38,10 @@ Ready sessions recorded **on or after the auto-start date** are submitted automa
 
 The **Job** column estimates how long processing takes: time left and expected finish time for a running job, and total time for other sessions. The estimate comes from the TIFF size and how long finished jobs took per GB, so it improves as more sessions are processed. Two jobs running at once can each take longer.
 
+**Movie ↗** opens a sped-up, motion-corrected preview of the recording (all planes, about a minute long). It's made by the suite2p step, so sessions processed before 2026-10-09 don't have one until suite2p is rerun.
+
+When a session has a problem (missing files, a TIFF problem, still uploading, or a failed job), its status message is a link (↗). It opens a page listing every folder where the pipeline looks for that session's files, with what's actually there: the TIFFs and `filter*` subfolders, the ViRMEn folder, the sync date folder and the output folder. Missing folders show what their parent folder contains instead, which helps spot a misnamed folder.
+
 The **QC** column shows the cell and R+ counts, behavior time and QC flags from `qc_summary.json`, e.g. `z drift`, `R+ cells`, `suite2p log`. Hover over a flag to see the full warning. **QC report ↗** opens the PDF in a new tab.
 
 ## Open the dashboard
