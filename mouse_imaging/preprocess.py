@@ -4,7 +4,7 @@ import numpy as np
 import suite2p
 from suite2p.run_s2p import logger_setup
 from mouse_imaging import *
-from mouse_imaging import compress
+from mouse_imaging import compress, tifrepair
 
 STEPS = ['suite2p', 'filters', 'anndata', 'qc', 'compress']
 
@@ -25,12 +25,19 @@ def suite2p_settings(overrides):
     return settings
 
 def _run_s2p(data_dir, suite2p_dir, md, ops, registration_only=False):
-    """Run suite2p on the tifs in data_dir (all planes at once), writing to suite2p_dir."""
-    tif_files = list(Path(data_dir).glob('*.tif'))
+    """
+    Run suite2p on the tifs in data_dir (all planes at once), writing to suite2p_dir. If the last tif was cut off (e.g.
+    MATLAB crashed during the recording), suite2p reads a repaired copy of it instead (tifrepair.py), kept in
+    <suite2p_dir>/../repaired_tifs only while suite2p runs; repair.json there records what was dropped.
+    """
+    repair_dir = Path(suite2p_dir).parent / 'repaired_tifs'
+    frames_per_volume = (md['nslices'] + md['nflyback']) * md['nchannels']
+    tif_files, _ = tifrepair.prepare_tif_list(data_dir, repair_dir, frames_per_volume)
     assert len(tif_files) > 0, f'No tifs in {data_dir}'
 
     db = {
         'data_path': [str(data_dir)], # Directory where your input files are located
+        'file_list': tif_files, # absolute paths, so suite2p uses them as they are (including a repaired last file)
         'save_path0': str(Path(suite2p_dir).parent), # suite2p writes to save_path0/save_folder, so outputs land directly in suite2p_dir
         'save_folder': Path(suite2p_dir).name,
         # 'file_list': tif_files, # Specify files you'd like to specifically use in the data_path
@@ -52,6 +59,7 @@ def _run_s2p(data_dir, suite2p_dir, md, ops, registration_only=False):
     try:
         suite2p.run_s2p(settings=settings, db=db)
     finally:
+        tifrepair.remove_copies(repair_dir)
         # logger_setup adds a file handler on every call; remove it so later runs don't also write to this run.log
         s2p_logger = logging.getLogger('suite2p')
         for handler in [h for h in s2p_logger.handlers if isinstance(h, logging.FileHandler)]:

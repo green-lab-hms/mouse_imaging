@@ -203,6 +203,13 @@ def compute_qc(adata, ops=None):
             listed = ', '.join(f'plane\u00a0{p}\u00a0({corr[p]:.2f})' for p in low)
             warn('filter alignment', f"{name} matches the session image poorly after alignment in {listed} (correlation of "
                                      f"high-passed green images, limit {thresh['min_filter_corr']}). Wrong field of view or z plane?")
+    # Recordings whose last TIFF was cut off (MATLAB crash): suite2p read a repaired copy (tifrepair.py)
+    repair_json = Path(str(path['preprocessed_dir'])) / 'repaired_tifs' / 'repair.json'
+    if repair_json.exists():
+        r = json.loads(repair_json.read_text())
+        notes.append(f"The last TIFF ({Path(r['file']).name}) was cut off after {r['pages_complete']} of {r['pages_listed']} frames, "
+                     f"probably because MATLAB crashed. suite2p used {r['volumes_kept']:,} whole volumes and dropped the last "
+                     f"{r['frames_dropped']} frames; a sync mismatch at the end of the recording is expected.")
     # One note per z offset, naming every stack taken at it
     by_offset = {}
     for name, f in filters.items():

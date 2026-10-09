@@ -267,6 +267,6 @@ The code is being ported from the HMS O2 cluster to spinoza. Step 1 and step 2 o
 - the `session.py --update` analyses
 - photostimulation processing
 
-Known issue, to fix: when MATLAB (ScanImage) crashes during a recording, the last TIFF ends mid-frame. The pipeline flags it as a **TIFF problem**, but there's no automatic workaround yet (e.g. trimming the incomplete last frames before suite2p).
+Recordings cut off by a MATLAB (ScanImage) crash: the last TIFF ends mid-frame and can't be read. Preprocessing handles this automatically: suite2p reads a repaired copy of that file with only its complete volumes (`tifrepair.py`), the raw file is left unchanged, and the QC report notes how many frames were dropped.
 
 See the "Migration state" section of [CLAUDE.md](CLAUDE.md) for details.

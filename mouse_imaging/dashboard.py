@@ -48,7 +48,7 @@ def status_json():
         qc = out.get('qc') or {}
         sessions.append({
             'id': sid, 'mouse': e['mouse'], 'date': e['date'], 'session': e['session'],
-            'status': e.get('status'), 'detail': e.get('detail'), 'ignored': bool(e.get('ignored')),
+            'status': e.get('status'), 'detail': e.get('detail'), 'tif_notes': e.get('tif_notes') or [], 'ignored': bool(e.get('ignored')),
             'n_tifs': files.get('n_tifs', 0), 'empty_folder': files.get('empty_folder', False), 'n_compressed': files.get('n_compressed', 0), 'tif_gb': round(files.get('tif_bytes', 0) / 1e9, 1),
             'virmen': files.get('virmen', False), 'sync': bool(files.get('sync')), 'filter_stacks': files.get('filter_stacks', {}),
             'done_at': out.get('adata_time'),
@@ -445,6 +445,7 @@ td.num, .num { font-variant-numeric: tabular-nums; }
 .pill.c-done .i { color: var(--good); } .pill.c-running .i, .pill.c-pending .i, .pill.c-queued .i { color: var(--accent); }
 .pill.c-uploading .i, .pill.c-not_queued .i { color: var(--text-3); } .pill.c-missing_files .i { color: var(--warning); }
 .pill.c-tiff_problem .i { color: var(--serious); } .pill.c-failed .i { color: var(--critical); }
+.detail.note { color: var(--warning); cursor: help; }
 .detail { margin-top: 5px; font-size: 12px; color: var(--text-2); max-width: 46ch; }
 a.detail { display: block; color: var(--text-2); text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--text-3); text-underline-offset: 2px; }
 a.detail:hover { color: var(--text); text-decoration-color: var(--accent); }
@@ -576,7 +577,7 @@ function row(s) {
     <td><div class="sid">${esc(s.mouse)}<span class="date">${dateStr(s.date)}</span></div><div class="small">${esc(s.session)}</div></td>
     <td>${files}</td>
     <td><span class="pill c-${esc(s.status)}"><span class="i" aria-hidden="true">${st.icon}</span>${st.label}</span>${
-      PROBLEM.has(s.status) ? `<a class="detail" href="/files/${s.id}" target="_blank" rel="noopener" title="Open the list of files in this session's folders">${esc(s.detail)}<span class="go">↗</span></a>` : `<div class="detail">${esc(s.detail)}${s.status === 'done' && s.done_at ? ` · ${new Date(s.done_at * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}` : ''}</div>`}</td>
+      PROBLEM.has(s.status) ? `<a class="detail" href="/files/${s.id}" target="_blank" rel="noopener" title="Open the list of files in this session's folders">${esc(s.detail)}<span class="go">↗</span></a>` : `${s.tif_notes && s.tif_notes.length ? `<div class="detail note" title="${esc(s.tif_notes.join(' '))}">ⓘ Last TIFF cut off; complete volumes are used</div>` : ''}<div class="detail">${esc(s.detail)}${s.status === 'done' && s.done_at ? ` · ${new Date(s.done_at * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}` : ''}</div>`}</td>
     <td>${qc}</td>
     <td>${job}${eta}${log}</td>
     <td><div class="actions">${btn}${rmdir}${ign}</div></td></tr>`;

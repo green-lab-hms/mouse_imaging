@@ -137,8 +137,12 @@ def check_files(mouse, date, session):
     }
 
 def check_tifs(files, mouse, date, session):
-    """Problems that suggest an incomplete TIFF upload, as a list of messages (empty if none)."""
-    problems = []
+    """
+    Problems that suggest an incomplete TIFF upload (list of messages; empty if none), and notes that don't block
+    processing. A last TIFF cut off mid-frame (usually MATLAB crashed during the recording) is a note: preprocessing
+    reads a repaired copy of it (tifrepair.py).
+    """
+    problems, notes = [], []
     names, sizes = files['tif_names'], files['tif_sizes']
     indices = [int(m.group(1)) for m in (TIF_INDEX_RE.search(n) for n in names) if m]
     if len(indices) == len(names) and indices:
@@ -150,19 +154,16 @@ def check_tifs(files, mouse, date, session):
     if sizes and len(sizes) > 1 and sizes[-1] > max(sizes[:-1]):
         problems.append('The last TIFF is larger than the others')
     if names and not problems:
-        import tifffile
+        from mouse_imaging import tifrepair
         last = config.get_path('raw_root') / 'twophoton' / mouse / date / session / names[-1]
         try:
-            with tifffile.TiffFile(last) as tif:
-                page = tif.pages[-1]  # reads through the page list to the end of the file
-                data_end = max(o + n for o, n in zip(page.dataoffsets, page.databytecounts))
-            if data_end > sizes[-1]:
-                # Usually MATLAB/ScanImage crashed during the recording, so the file was never finished (TODO: work around this)
-                problems.append(f'The last TIFF ({names[-1]}) is cut off: its last frame ends {data_end - sizes[-1]:,} bytes past the end of the file, '
-                                'probably because MATLAB crashed during the recording')
+            cut = tifrepair.truncation(last)
+            if cut:
+                notes.append(f'The last TIFF ({names[-1]}) is cut off after {cut[0]} of {cut[1]} frames, probably because MATLAB '
+                             'crashed; preprocessing uses its complete volumes')
         except Exception as e:
             problems.append(f'The last TIFF ({names[-1]}) cannot be read: {type(e).__name__}')
-    return problems
+    return problems, notes
 
 # ---- Outputs and jobs ----
 
@@ -317,7 +318,7 @@ def scan(submit_jobs=True, verbose=False):
             out = outputs(mouse, date, session)
             # Read the last TIFF once per snapshot, when the upload looks finished
             if files['snapshot'] != entry.get('tif_checked_snapshot') and files['n_tifs'] and entry.get('snapshot') == files['snapshot']:
-                entry['tif_problems'] = check_tifs(files, mouse, date, session)
+                entry['tif_problems'], entry['tif_notes'] = check_tifs(files, mouse, date, session)
                 entry['tif_checked_snapshot'] = files['snapshot']
             status, detail = evaluate(entry, files, out, now, state['auto_start_date'], s['quiet_minutes'])
             entry.update(snapshot=files['snapshot'], status=status, detail=detail, checked=now,
