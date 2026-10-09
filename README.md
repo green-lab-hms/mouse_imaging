@@ -4,6 +4,12 @@ Preprocessing and analysis of two-photon calcium imaging in mice running virtual
 
 `mouse_imaging` turns one recording session into a single [AnnData](https://anndata.readthedocs.io) file. A session's raw data is ScanImage TIFFs, a ViRMEn behavior file and a DAQ sync file. The AnnData file holds neural activity, behavior aligned to each imaging volume, and per-cell properties, so a session can be loaded and analyzed with one line of code.
 
+> [!TIP]
+> **Green lab: start here → [Working on spinoza with VS Code](tools/README.md)**
+>
+> The usual way to use this package is from VS Code on your own computer, connected to spinoza through a tunnel. The guide goes step by step from a fresh account to running the example notebook:
+> setting up the environment → starting the tunnel (`sbatch tools/vscode.sh`) → connecting from VS Code → running [`examples/example_session.ipynb`](examples/example_session.ipynb).
+
 ## Installation
 
 There are two ways to install, depending on whether you'll change the code.
