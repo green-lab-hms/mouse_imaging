@@ -154,7 +154,7 @@ Each session is one AnnData object. Rows are **imaging volumes** (time points) a
 - **Behavior:** `obs` holds the behavioral data. Each ViRMEn variable (position `x`/`y`, heading `h`, velocity `dx`/`dy`/`dh`, `trial`, `inITI`, `reward`, `lick`, plus any extra `user0..N` channels) is resampled to the time of each imaging volume. The full-rate ViRMEn table is in `uns['vr']`.
 - **Time:** `obs['t']` is in seconds on the sync clock. Because volumes are ~7.5 Hz with 3 planes, each row is one volume, not one frame.
 - **Red and green brightness:** `var['G']` and `var['R']` are the mean brightness inside the cell minus the mean in a 2-pixel ring around it, measured on suite2p's registered mean image of each channel.
-- **Derived layers:** `options.preprocess_activity(adata)` adds smoothed and normalized layers (`dcnv_0.25sigma`, `dcnv_norm`, `dcnv_0.25sigma_norm`). Many analysis functions expect these.
+- **Derived layers:** the `anndata` step also saves smoothed and normalized layers (`dcnv_0.25sigma`, `dcnv_norm`, `dcnv_0.25sigma_norm`; `sess.preprocess_activity`), and drops cells with no activity. Many analysis functions expect these.
 
 ## Usage
 
@@ -214,11 +214,10 @@ python -m mouse_imaging.preprocess --mouse JG6 --date 260929 --session session_1
 ### Load and analyze
 
 ```python
-from mouse_imaging import sess, an, pl, options
+from mouse_imaging import sess, an, pl
 
 # Load one or more sessions of a mouse as a list of AnnData objects
 adatas = sess.load_imaging_sessions('JG6', dates=['260929',])
-adatas = [options.preprocess_activity(adata) for adata in adatas]
 
 # Mean activity of running periods in 20-unit position bins, per cell
 tunings = [an.binX1(adata, obs='y', bins=range(0, 401, 20), obs_key={'dy': '>5'}) for adata in adatas]
@@ -248,8 +247,8 @@ The code is in the [`mouse_imaging/`](mouse_imaging) folder. `examples/` has the
 | `qc.py` | | QC report (`qc_report.pdf`, `qc_summary.json`): session summary, registration and drift checks |
 | `pipeline.py` | | Automatic preprocessing: finds new sessions, checks uploads are complete, submits jobs (run by cron) |
 | `dashboard.py` | | Web dashboard for the pipeline: session status, QC flags, process buttons |
-| `session.py` | `sess` | Paths, metadata, sync, `Session` assembly, loading AnnData |
-| `options.py` | | `default_ops()` settings, activity preprocessing, cell-type calling |
+| `session.py` | `sess` | Paths, metadata, sync, `Session` assembly, activity layers, loading AnnData |
+| `options.py` | | `default_ops()` settings, cell-type calling |
 | `analysis.py` | `an` | Binning, tuning, event-triggered activity, regression |
 | `plot_jg.py` | `pl` | Plotting: fields of view, cells, binned and triggered activity |
 | `config.py` | | System settings: data locations, read from the config file |

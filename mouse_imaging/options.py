@@ -166,66 +166,18 @@ def celltype_stats_BR_ChRmine(adatas):
     return df      
 
 # Processing
-def preprocess_activity(adata, sigma_s=0.25):
-    print('Preprocessing activity.')
-    import scipy.ndimage
-
-    if 'dcnv' not in adata.layers.keys():
-        adata.layers['dcnv'] = adata.X
-
-    sigma = sigma_s / adata.obs['dt'].mean()
-    adata.layers['dcnv_0.25sigma'] = scipy.ndimage.gaussian_filter1d(adata.layers['dcnv'], sigma=sigma, axis=0)
-    cell_max = np.percentile(adata.layers['dcnv_0.25sigma'], 99, axis=0)
-    
-    # Remove noise
-    adata = adata[:, cell_max>0].copy()
-    cell_max = cell_max[cell_max>0]
-
-    adata.layers['dcnv_0.25sigma_norm'] = adata.layers['dcnv_0.25sigma'] / cell_max
-    adata.layers['dcnv_norm'] = adata.layers['dcnv'] / cell_max
-
-    return adata
-    
-def add_corrmat(adata, layers):
-    # Compute correlation matrix
-    for layer in layers:
-        print(f'Computing correlation matrix on {layer}.')
-        adata.varp[f'corr_{layer}'] = pd.DataFrame(adata.layers[layer], columns=adata.var_names).corr()
-
-def add_nneighbor_graph(adata, layers, n_neighbors=10):
-    from sklearn.neighbors import kneighbors_graph
-    # Compute nearest neighbor graph matrix
-    for layer in layers:
-        print(f'Computing nearest neighbor graph on {layer}.')
-        adata.varp[f'nearest_neighbor_{n_neighbors}_{layer}'] = kneighbors_graph(adata.layers[layer].T, n_neighbors=n_neighbors)
-
-def add_umap(adata, layers):
-    import mouse_imaging.analysis as an
-    # Compute UMAP
-    for layer in layers:
-        print(f'Computing umaps on {layer}.')
-        adata.obs[[f'umap_x_{layer}', f'umap_y_{layer}']] = an.umap_Xtime(adata.layers[layer])
-        adata.var[[f'umap_x_{layer}', f'umap_y_{layer}']] = an.umap_Xcell(adata.layers[layer])
-
-def add_leiden_clustering(adata, layers):
-    import mouse_imaging.analysis as an
-    # Compute leiden clustering
-    for layer in layers:
-        print(f'Computing leiden clustering on {layer}.')
-        adata.var[f'leiden_{layer}'] = an.leiden_Xcell(adata.layers[layer]).membership
-
 def process_SstCreRFP_Sst44nlsBFP(adata, do_corrmat=True, do_nneighbor_graph=True, do_umap=True, do_leiden=True):
+    from mouse_imaging import session as sess
     adata.var = call_celltypes_BR(adata.var, adata.uns['ops'])
-    adata = preprocess_activity(adata, sigma_s=0.25)
     layers = ['dcnv_norm', 'dcnv_0.25sigma_norm']
     if do_corrmat:
-        add_corrmat(adata, layers)
+        sess.add_corrmat(adata, layers)
     if do_nneighbor_graph:
-        add_nneighbor_graph(adata, layers, n_neighbors=10)
+        sess.add_nneighbor_graph(adata, layers, n_neighbors=10)
     if do_umap:
-        add_umap(adata, layers)
+        sess.add_umap(adata, layers)
     if do_leiden:
-        add_leiden_clustering(adata, layers)
+        sess.add_leiden_clustering(adata, layers)
 
     print('Computing celltype mean activity.')
     celltype_idx = {'Sst44': adata.var['celltype']=='B+R+',
@@ -238,17 +190,17 @@ def process_SstCreRFP_Sst44nlsBFP(adata, do_corrmat=True, do_nneighbor_graph=Tru
     return adata
 
 def process_ChRmine_Sst44nlsBFP(adata, do_corrmat=False, do_nneighbor_graph=False, do_umap=False, do_leiden=False):
+    from mouse_imaging import session as sess
     adata.var = call_celltypes_BR_ChRmine(adata.var, adata.uns['ops'])
-    adata = preprocess_activity(adata, sigma_s=0.25)
     layers = ['dcnv', 'dcnv_0.25sigma']
     if do_corrmat:
-        add_corrmat(adata, layers)
+        sess.add_corrmat(adata, layers)
     if do_nneighbor_graph:
-        add_nneighbor_graph(adata, layers, n_neighbors=10)
+        sess.add_nneighbor_graph(adata, layers, n_neighbors=10)
     if do_umap:
-        add_umap(adata, layers)
+        sess.add_umap(adata, layers)
     if do_leiden:
-        add_leiden_clustering(adata, layers)
+        sess.add_leiden_clustering(adata, layers)
 
     print('Computing celltype mean activity.')
     celltype_idx = {'Sst44': adata.var['Sst44+'],

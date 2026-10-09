@@ -500,6 +500,8 @@ def load_as_anndata(mouse=None, date=None, session='session_1', adata_filekey='a
     adata_file = path[adata_filekey]
     if os.path.isfile(adata_file) and not recompute:
         adata = anndata.read_h5ad(adata_file)
+        if adata_filekey == 'adata_h5ad' and 'dcnv_norm' not in adata.layers:
+            adata = preprocess_activity(adata)  # files saved before main added these layers
     else:
         if skip_if_not_saved:
             warnings.warn(f'No anndata file for {mouse} {date} {session}.')
@@ -642,6 +644,59 @@ def select_cells(adata, criteria=['isnotclipped', 'isnotnearedge', 'iscell']):
         adata = adata[:, idx]
     adata = adata[:, ~np.isnan(adata.layers['dF']).any(axis=0)]
     return adata
+
+def preprocess_activity(adata, sigma_s=0.25):
+    """
+    Add smoothed and normalized copies of the deconvolved activity, which many analysis functions expect:
+    'dcnv_0.25sigma' (Gaussian, sigma_s seconds), and 'dcnv_norm' / 'dcnv_0.25sigma_norm' (each cell divided by
+    the 99th percentile of its smoothed activity). Drops cells with no activity. Run by main before saving.
+    """
+    print('Preprocessing activity.')
+    import scipy.ndimage
+
+    if 'dcnv' not in adata.layers.keys():
+        adata.layers['dcnv'] = adata.X
+
+    sigma = sigma_s / adata.obs['dt'].mean()
+    adata.layers['dcnv_0.25sigma'] = scipy.ndimage.gaussian_filter1d(adata.layers['dcnv'], sigma=sigma, axis=0)
+    cell_max = np.percentile(adata.layers['dcnv_0.25sigma'], 99, axis=0)
+    
+    # Remove noise
+    adata = adata[:, cell_max>0].copy()
+    cell_max = cell_max[cell_max>0]
+
+    adata.layers['dcnv_0.25sigma_norm'] = adata.layers['dcnv_0.25sigma'] / cell_max
+    adata.layers['dcnv_norm'] = adata.layers['dcnv'] / cell_max
+
+    return adata
+
+def add_corrmat(adata, layers):
+    # Compute correlation matrix
+    for layer in layers:
+        print(f'Computing correlation matrix on {layer}.')
+        adata.varp[f'corr_{layer}'] = pd.DataFrame(adata.layers[layer], columns=adata.var_names).corr()
+
+def add_nneighbor_graph(adata, layers, n_neighbors=10):
+    from sklearn.neighbors import kneighbors_graph
+    # Compute nearest neighbor graph matrix
+    for layer in layers:
+        print(f'Computing nearest neighbor graph on {layer}.')
+        adata.varp[f'nearest_neighbor_{n_neighbors}_{layer}'] = kneighbors_graph(adata.layers[layer].T, n_neighbors=n_neighbors)
+
+def add_umap(adata, layers):
+    from mouse_imaging import analysis as an
+    # Compute UMAP
+    for layer in layers:
+        print(f'Computing umaps on {layer}.')
+        adata.obs[[f'umap_x_{layer}', f'umap_y_{layer}']] = an.umap_Xtime(adata.layers[layer])
+        adata.var[[f'umap_x_{layer}', f'umap_y_{layer}']] = an.umap_Xcell(adata.layers[layer])
+
+def add_leiden_clustering(adata, layers):
+    from mouse_imaging import analysis as an
+    # Compute leiden clustering
+    for layer in layers:
+        print(f'Computing leiden clustering on {layer}.')
+        adata.var[f'leiden_{layer}'] = an.leiden_Xcell(adata.layers[layer]).membership
 
 def get_min_dist_to_edge(stati, Lx=512, Ly=512):
     min_dist_to_edge = min(stati['xpix'].min(), Lx - stati['xpix'].max(), 
@@ -1184,6 +1239,7 @@ def main(mouse, date, session='session_1', ops=None, recompute=True, save=True):
         ops = options.default_ops()
     adata = load_as_anndata(mouse=mouse, date=date, session=session, ops=ops, adata_filekey='adata_allsources_h5ad', recompute=recompute, save=False, skip_if_not_saved=False)
     adata = select_cells(adata)
+    adata = preprocess_activity(adata)
     t0 = time.perf_counter()
 
     if 'process_fcn' in ops.keys():
