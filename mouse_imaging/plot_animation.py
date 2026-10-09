@@ -20,7 +20,7 @@ matplotlib_inline.backend_inline.set_matplotlib_formats('retina')
 
 def sbatch_plot_animation(**kwargs):
     shell_script = """
-    sbatch ~/code/mouse_imaging/plot_animation.slurm {mouse} {date} {session} {trial} {path_out} {fps}
+    sbatch ~/code/mouse_imaging/mouse_imaging/plot_animation.slurm {mouse} {date} {session} {trial} {path_out} {fps}
     """.format(**kwargs)
     print(shell_script)
     out = subprocess.call(shell_script, shell=True)

@@ -92,7 +92,7 @@ A config file only needs the keys it changes; the rest keep their defaults. If a
 python -c "from mouse_imaging import config; print(config.describe_source()); print(config.load_config())"
 ```
 
-On a new cluster, also check the `#SBATCH` lines at the top of `preprocess.slurm`: partition, CPUs, memory and time limit. You can edit them, or override them when submitting, e.g. `sbatch -p <partition> preprocess.slurm ...`. The script uses the `conda` on your `PATH`. If batch jobs can't find it, pass your conda location: `sbatch --export=ALL,CONDA_BASE=/path/to/miniforge3 preprocess.slurm ...`.
+On a new cluster, also check the `#SBATCH` lines at the top of `mouse_imaging/preprocess.slurm`: partition, CPUs, memory and time limit. You can edit them, or override them when submitting, e.g. `sbatch -p <partition> mouse_imaging/preprocess.slurm ...`. The script uses the `conda` on your `PATH`. If batch jobs can't find it, pass your conda location: `sbatch --export=ALL,CONDA_BASE=/path/to/miniforge3 mouse_imaging/preprocess.slurm ...`.
 
 ## How it works
 
@@ -195,14 +195,14 @@ Preprocessing has three steps, which can be run together or separately:
 
 The thresholds are in `options.default_ops()['qc']`.
 
-On spinoza, from the repo directory, or anywhere if you copy `preprocess.slurm`:
+On spinoza, from the repo directory, or anywhere if you copy `mouse_imaging/preprocess.slurm`:
 
 ```bash
-sbatch preprocess.slurm <mouse> <date> [session] [steps]
+sbatch mouse_imaging/preprocess.slurm <mouse> <date> [session] [steps]
 # e.g.
-sbatch preprocess.slurm JG6 260929                     # all steps, session_1
-sbatch preprocess.slurm JG6 260929 session_2           # all steps, the day's second session
-sbatch preprocess.slurm JG6 260929 session_1 anndata,qc   # rebuild adata.h5ad and the QC report from existing suite2p output
+sbatch mouse_imaging/preprocess.slurm JG6 260929              # all steps, session_1
+sbatch mouse_imaging/preprocess.slurm JG6 260929 session_2    # all steps, the day's second session
+sbatch mouse_imaging/preprocess.slurm JG6 260929 session_1 anndata,qc   # rebuild adata.h5ad and the QC report from existing suite2p output
 ```
 
 The script runs `python -m mouse_imaging.preprocess`, which you can also call directly:
@@ -239,6 +239,8 @@ See [examples/example_session.ipynb](examples/example_session.ipynb) for a full 
 - individual cells
 
 ### Package layout
+
+The code is in the [`mouse_imaging/`](mouse_imaging) folder. `examples/` has the example notebook, and `tools/` has the VS Code tunnel and pipeline scripts and guides.
 
 | Module | Alias | Contents |
 |---|---|---|

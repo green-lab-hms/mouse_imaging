@@ -12,25 +12,25 @@ The code was originally written for the HMS O2 cluster (`/n/data2/...`, `/n/scra
 
 - Conda env: `mouse_imaging`, at `~/.conda/envs/mouse_imaging`, with suite2p 1.1 and torch. The package is installed in editable mode (`pip install -e .`), so code changes take effect without reinstalling.
 - Install: `conda env create -f environment.yml` creates the env and runs `pip install -e .[suite2p,notebook]`. Into an existing env, run `pip install -e .` (core) or `pip install -e ".[suite2p]"` (preprocessing). Dependencies are in `pyproject.toml`.
-- The repo root *is* the package: `pyproject.toml` maps it with `package-dir = {"mouse_imaging" = "."}` instead of using a `src/` layout. A regular (non-editable) `pip install .` or `pip wheel .` fails when run inside the repo on the network share (`Directory not empty` when cleaning up `build/`); build from a copy on local disk if you need a wheel.
+- Layout: the package code is in `mouse_imaging/` (all modules plus `preprocess.slurm`, which is shipped as package data, and `plot_animation.slurm`). The repo root holds `pyproject.toml`, `environment.yml`, `config.example.toml`, the docs, `examples/` and `tools/`. After pulling a change that moves or adds packaged files, re-run `pip install -e .`.
 - Activate on spinoza: `conda activate mouse_imaging`. Conda is at `/molbio/hpc/apps/miniforge3` and is on `PATH`, including in batch jobs. `preprocess.slurm` uses `eval "$(conda shell.bash hook)"` rather than a hard-coded conda path.
 - Cluster: SLURM, a single node `spinoza` (partition `defq`, 96 CPUs, about 250 GB RAM, **no GPU**, so suite2p/cellpose run with `torch_device='cpu'`).
 - There are no tests, linter or build step. To check your changes, import the module and run the relevant script:
   ```bash
-  cd ~/code && python -c "import mouse_imaging.preprocess"
+  python -c "import mouse_imaging.preprocess"
   ```
 
 ### Entry points
 
 | Command | What it does |
 |---|---|
-| `sbatch preprocess.slurm <mouse> <date> [session] [steps]` | Runs `preprocess.py`: step `suite2p` (all planes together), then step `anndata` (builds the `Session` and AnnData and saves `adata.h5ad`), then step `qc` (`qc.py` writes `qc_report.pdf`). `steps` is comma-separated and defaults to `suite2p,anndata,qc`; pass `anndata,qc` to rebuild without rerunning suite2p. The log goes to `preprocess_<jobid>.log` in the directory you submit from. |
+| `sbatch mouse_imaging/preprocess.slurm <mouse> <date> [session] [steps]` | Runs `preprocess.py`: step `suite2p` (all planes together), then step `anndata` (builds the `Session` and AnnData and saves `adata.h5ad`), then step `qc` (`qc.py` writes `qc_report.pdf`). `steps` is comma-separated and defaults to `suite2p,anndata,qc`; pass `anndata,qc` to rebuild without rerunning suite2p. The log goes to `preprocess_<jobid>.log` in the directory you submit from. |
 | `python -m mouse_imaging.preprocess --mouse M --date D --steps anndata` | The same as above for step 2 only, run directly. It takes a few minutes, so it doesn't need SLURM. The SLURM script uses this module form too, so it works without a clone. |
-| `python session.py --mouse M --date D --update` | Re-runs `update_function` (photostim influence, tuning, regressions) on an existing `adata.h5ad`. |
+| `python -m mouse_imaging.session --mouse M --date D --update` | Re-runs `update_function` (photostim influence, tuning, regressions) on an existing `adata.h5ad`. |
 | `sbatch tools/vscode.sh [tunnel_name]` | Starts a VS Code tunnel job (1 CPU, 4 GB, 12 h by default). The login code and tunnel link are written to `~/vscode.out`. The current Claude Code session itself usually runs inside such a job; don't start a second tunnel with the same name, because that disconnects the running one. Step-by-step guide: `tools/README.md`. |
 | `python -m mouse_imaging.pipeline scan\|status\|queue ...` | Automatic preprocessing (`pipeline.py`). Cron runs `tools/pipeline_cron.sh` every 10 min as jgreen. Status is in `<derived_root>/.pipeline/state.json`. Guide: `tools/PIPELINE.md`. |
 | `python -m mouse_imaging.dashboard [--port 8050]` | Pipeline web dashboard (`dashboard.py`, stdlib `http.server`, binds 127.0.0.1, token in `~/.config/mouse_imaging/dashboard_token`). Always on at https://w50sdf6l-8050.use.devtunnels.ms: cron runs `tools/dashboard_service.sh` every 5 min, which keeps the dashboard and `~/bin/devtunnel host mouse-imaging-dashboard` running (flock per process). The tunnel allows only the green-lab-hms GitHub account. After editing `dashboard.py`, kill the dashboard process and cron restarts it with the new code. |
-| `sbatch plot_animation.slurm ...` | Renders VR and activity movies (`plot_animation.py`). This file still uses the O2 conda path. |
+| `sbatch mouse_imaging/plot_animation.slurm ...` | Renders VR and activity movies (`plot_animation.py`). This file still uses the O2 conda path. |
 
 `README.md` is the user-facing guide: install routes, a pipeline diagram and the AnnData layout. `examples/example_session.ipynb` is an executed walkthrough on JG6/260929/session_1. Re-execute it after changing APIs it uses: `jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.kernel_name=mouse_imaging examples/example_session.ipynb`.
 

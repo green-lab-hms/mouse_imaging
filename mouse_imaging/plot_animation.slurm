@@ -17,5 +17,5 @@ fps=30
 source /n/app/conda2/etc/profile.d/conda.sh
 conda activate mouse_imaging
 echo "Rendering animation for ${mouse} ${date} ${session} trial ${trial} at ${fps} frames per second. Saving in: \n${path_out}."
-python ~/code/mouse_imaging/plot_animation.py --mouse $mouse --date $date --session $session --trial $trial --path_out $path_out --fps $fps
+python ~/code/mouse_imaging/mouse_imaging/plot_animation.py --mouse $mouse --date $date --session $session --trial $trial --path_out $path_out --fps $fps
 
