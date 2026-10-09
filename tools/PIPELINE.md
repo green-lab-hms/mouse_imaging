@@ -56,8 +56,8 @@ The **QC** column shows the cell and R+ counts, behavior time and QC flags from 
 
 This works from any browser, without logging into spinoza or starting a VS Code tunnel:
 
-1. Sign in with GitHub as **green-lab-hms**. Other accounts can't open the page.
-2. The first time, the page asks for the access token. Get it on spinoza with `cat ~/.config/mouse_imaging/dashboard_token` (jgreen's account). Your browser remembers it for a year.
+1. Sign in with GitHub, with your own account if you're a member of the **Green-Lab-MGH** organization (https://github.com/orgs/Green-Lab-MGH), or as **green-lab-hms**. Other accounts can't open the page. Ask a lab admin to invite you to the organization.
+2. The first time, the page asks for the access token. Ask Jonathan for it (it's in `~/.config/mouse_imaging/dashboard_token` on jgreen's account). Your browser remembers it for a year. Jobs started from the dashboard run as jgreen.
 
 It refreshes every 30 seconds. **Scan now** checks all sessions immediately instead of waiting for the next cron run.
 
