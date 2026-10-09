@@ -176,13 +176,14 @@ For example, `JG6 260929 session_2` reads:
 
 It writes to `<derived_root>/JG6/260929/session_2/`. Raw data has to be in this folder structure before preprocessing.
 
-Preprocessing has four steps, which can be run together or separately:
+Preprocessing has five steps, which can be run together or separately:
 
 | Step | Does | Output |
 |---|---|---|
 | `suite2p` | Motion correction, cell detection, fluorescence extraction and deconvolution, plus `movie.mp4`, a sped-up preview of the motion-corrected recording (about a minute, a few MB). Slow: about 20 minutes on CPU for the 22-minute, 3-plane test session (JG6/260929). | `suite2p/plane0..N/` |
 | `filters` | Motion-corrects the extra stacks in `filter*` subfolders of the raw session, e.g. `filter2` (blue and green, 850 nm) and `filter1_1024` (the session's filters at 1024 × 1024), and saves their time-averaged images. Skipped if there are none. A few minutes. | `filter2/mean.tif`, `filter1_1024/mean.tif` |
 | `anndata` | Aligns suite2p output with behavior and sync, measures cell properties and saves the AnnData. About 1 minute. | `adata.h5ad` |
+| `compress` | Losslessly compresses the raw TIFFs (session folder and subfolders) to `.tif.zst`, about 57% of their size, after checking each round trip. Later runs that need the TIFFs decompress them first. Any zstd tool opens them: `zstd -d file.tif.zst`. | `<raw>/…/*.tif.zst` |
 | `qc` | Writes a QC report: session info, recording time, cell and R+ cell counts, registration and drift plots, and warnings. Seconds. | `qc_report.pdf` |
 
 **Check `qc_report.pdf` after preprocessing.** Page 1 summarizes the session and lists warnings. Page 2 plots registration shifts, registration quality and cell brightness over time. Page 3 shows the mean images. A warning is listed when:

@@ -89,8 +89,12 @@ def read_si_tif_metadata(si_tif, functional_filter='G'):
     ScanImage header of one tif plus the derived keys used everywhere: nslices, nflyback, nchannels, Ly, Lx,
     volume_rate, dt, zs (slice z positions, um) and 'filter1' (wavelength, channels, region parsed from the filename).
     """
+    from mouse_imaging import compress
+    with compress.readable_tif(si_tif) as readable:  # a compressed .tif.zst is read from a temporary copy
+        metadata = parse_si_metadata(ScanImageTiffReader(str(readable)).metadata())
     si_tif = str(si_tif)
-    metadata = parse_si_metadata(ScanImageTiffReader(si_tif).metadata())
+    if si_tif.endswith(compress.SUFFIX):
+        si_tif = si_tif[:-len(compress.SUFFIX)]
     metadata['nslices'] = int(metadata['SI.hStackManager.actualNumSlices'])
     metadata['nflyback'] = int(metadata['SI.hFastZ.numDiscardFlybackFrames'])
     metadata['nchannels'] = _n_saved_channels(metadata)
@@ -208,7 +212,8 @@ def define_path(mouse=None, date=None, session='session_1', ops=None, makedir=Fa
     if ops['imaging']:
     # Two-photon path
         path['twophoton_dir'] = path['raw_root'] / 'twophoton' / mouse / date / session
-        raw_tifs = sorted(list(path['twophoton_dir'].glob('*.tif')))
+        # .tif, or .tif.zst once the compress step has run (see compress.py)
+        raw_tifs = sorted(path['twophoton_dir'].glob('*.tif')) or sorted(path['twophoton_dir'].glob('*.tif.zst'))
         path['raw_image1_tif'] = raw_tifs[0] if raw_tifs else None
             
         # Sync path
@@ -229,7 +234,7 @@ def define_path(mouse=None, date=None, session='session_1', ops=None, makedir=Fa
         # (same filters as the session at 1024 x 1024). The filters step saves each one's registered mean images in
         # <preprocessed_dir>/<name>/: mean.tif (planes x channels x Ly x Lx), metadata.json and suite2p/plane*/ops.npy
         path['filter_raw_dirs'] = {d.name: d for d in sorted(path['twophoton_dir'].glob('filter*'))
-                                   if d.is_dir() and any(d.glob('*.tif'))}
+                                   if d.is_dir() and (any(d.glob('*.tif')) or any(d.glob('*.tif.zst')))}
         path['filter_dirs'] = {name: path['preprocessed_dir'] / name for name in path['filter_raw_dirs']}
 
         # Suite2p output, one folder per plane (0-based). Format with plane=

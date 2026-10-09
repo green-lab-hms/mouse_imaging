@@ -23,6 +23,7 @@ dependencies = [
     "umap-learn",
     "scikit-learn",
     "tqdm",
+    "zstandard",  # raw TIFF compression (compress.py)
 ]
 
 [project.optional-dependencies]

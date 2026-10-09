@@ -4,8 +4,9 @@ import numpy as np
 import suite2p
 from suite2p.run_s2p import logger_setup
 from mouse_imaging import *
+from mouse_imaging import compress
 
-STEPS = ['suite2p', 'filters', 'anndata', 'qc']
+STEPS = ['suite2p', 'filters', 'anndata', 'qc', 'compress']
 
 def suite2p_settings(overrides):
     """
@@ -194,6 +195,13 @@ def main(mouse, date, session='session_1', ops_name='default_ops', steps=STEPS):
     path = sess.define_path(mouse, date, session, ops=ops)
     md = sess.get_metadata(path)
 
+    # Steps that read raw TIFFs need them uncompressed; the compress step compresses them again at the end
+    if 'suite2p' in steps:
+        compress.decompress_dir(path['twophoton_dir'])
+    if 'filters' in steps:
+        for raw_dir in path['filter_raw_dirs'].values():
+            compress.decompress_dir(raw_dir)
+
     # Step 1: motion correction, ROI detection, extraction and deconvolution
     if 'suite2p' in steps:
         run_suite2p(path, md, ops)
@@ -210,6 +218,10 @@ def main(mouse, date, session='session_1', ops_name='default_ops', steps=STEPS):
     if 'qc' in steps:
         from mouse_imaging import qc
         qc.main(mouse, date, session, ops=ops)
+
+    # Step 4: losslessly compress the raw TIFFs (session folder and subfolders) to .tif.zst, about 57% of their size
+    if 'compress' in steps:
+        compress.compress_dir(path['twophoton_dir'])
 
 if __name__ == '__main__':
     import argparse
