@@ -3,7 +3,7 @@
 #SBATCH -t 1-00:00
 #SBATCH -p defq
 #SBATCH -c 16
-#SBATCH --mem=64G
+#SBATCH --mem=48G
 #SBATCH -J preprocess
 #SBATCH -o preprocess_%j.log
 #SBATCH -e preprocess_%j.log
@@ -27,5 +27,10 @@ if ! command -v conda > /dev/null 2>&1 && [ -n "$CONDA_BASE" ]; then
 fi
 eval "$(conda shell.bash hook)"
 conda activate mouse_imaging
-echo "Running preprocessing steps ${steps} for ${mouse} ${date} ${session}."
+# spinoza's SLURM doesn't confine jobs to their cores (ConstrainCores=no), and torch/numba/BLAS otherwise start a
+# thread per core of the whole node, so cap them at this job's CPUs
+threads=${SLURM_CPUS_PER_TASK:-16}
+export OMP_NUM_THREADS=$threads MKL_NUM_THREADS=$threads OPENBLAS_NUM_THREADS=$threads NUMBA_NUM_THREADS=$threads
+
+echo "Running preprocessing steps ${steps} for ${mouse} ${date} ${session} on ${threads} threads."
 python -m mouse_imaging.preprocess --mouse $mouse --date $date --session $session --steps $steps

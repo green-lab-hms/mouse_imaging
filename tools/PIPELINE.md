@@ -19,7 +19,7 @@ The watcher looks at every `session_N` folder in `<raw_root>/twophoton/<mouse>/<
   - every TIFF except the last has the same size
   - the last TIFF can be read to its final frame
 
-Ready sessions recorded **on or after the auto-start date** are submitted automatically. That date is the day the pipeline was set up, 2026-10-09. Older sessions are listed as **Not queued** and are processed only when you click **Process**. Up to 2 preprocessing jobs run at a time; the rest wait as **Queued**.
+Ready sessions recorded **on or after the auto-start date** are submitted automatically. That date is the day the pipeline was set up, 2026-10-09. Older sessions are listed as **Not queued** and are processed only when you click **Process**. Up to 3 preprocessing jobs run at a time (16 cores each, half of spinoza, leaving the rest for analysis); the rest wait as **Queued**.
 
 ## Session statuses
 
@@ -124,7 +124,7 @@ The status is kept in `<derived_root>/.pipeline/state.json`, shared by the cron 
 [pipeline]
 auto_start_date = "261009"     # sessions recorded on or after this date (YYMMDD) are processed automatically
 quiet_minutes = 30             # how long files must be unchanged before an upload counts as finished
-max_concurrent_jobs = 2        # preprocessing jobs at a time (each uses 16 CPUs and 64 GB)
+max_concurrent_jobs = 3        # preprocessing jobs at a time; each uses 16 cores (threads are capped) and requests 48 GB, so 3 use half of spinoza
 state_dir = "/path/to/state"   # default: <derived_root>/.pipeline
 ```
 

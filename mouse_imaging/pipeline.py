@@ -40,7 +40,7 @@ def settings():
     return {
         'state_dir': Path(cfg.get('state_dir', derived_root / '.pipeline')).expanduser(),
         'quiet_minutes': float(cfg.get('quiet_minutes', 30)),
-        'max_concurrent_jobs': int(cfg.get('max_concurrent_jobs', 2)),
+        'max_concurrent_jobs': int(cfg.get('max_concurrent_jobs', 3)),  # 3 x 16 cores = half of spinoza's 96
         'auto_start_date': cfg.get('auto_start_date'), # None: the date of the first scan, saved in the state file
     }
 
