@@ -38,7 +38,10 @@ def default_ops(imaging=True, env=None, maze=None): # env is the mouse_imaging m
         ops['suite2p_settings'] = {
             'tau': 1.25, # timescale of gcamp to use for deconvolution
             'diameter': [6, 6], # check
-            'run': {'multiplane_parallel': False}, # True sends planes to a remote server over ssh, not local parallelism
+            'run': {'multiplane_parallel': False, # True sends planes to a remote server over ssh, not local parallelism
+                    # 2 forces registration when rerunning into an existing suite2p folder. With 1, suite2p sees the old
+                    # reg_outputs.npy and skips registration, although the binary is rewritten unregistered from the tiffs
+                    'do_registration': 2},
             'io': {'delete_bin': True},
             'registration': {'align_by_chan2': False,
                              'do_bidiphase': True},
