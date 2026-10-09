@@ -40,6 +40,8 @@ After a session is processed, its raw TIFFs are losslessly compressed to `.tif.z
 
 **Ignore** (under each session's button) moves a session to the small **Ignored** tab at the right, e.g. a test recording or one you'll never process. Ignored sessions keep updating their status but are never processed automatically, and they don't count in the status tiles. **Restore** brings one back. Running sessions can't be ignored. In the Ignored tab, **Delete TIFFs/Sync** permanently deletes the session's TIFFs (session folder and subfolders, compressed or not) and its sync file, after you type the session name to confirm. ViRMEn files, preprocessing output and other files are kept. Deletions are logged to `<derived_root>/.pipeline/deletions.log`.
 
+If a session's TIFF folder has no files left, only empty subfolders, **Delete empty folder** (on any tab) removes the folder and drops the session from the dashboard. It only removes empty folders and is logged too.
+
 The **Job** column estimates how long processing takes: time left and expected finish time for a running job, and total time for other sessions. The estimate comes from the TIFF size and how long finished jobs took per GB, so it improves as more sessions are processed. Two jobs running at once can each take longer.
 
 **Movie ↗** opens a sped-up, motion-corrected preview of the recording (all planes, about a minute long). It's made by the suite2p step, so sessions processed before 2026-10-09 don't have one until suite2p is rerun.

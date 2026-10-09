@@ -49,7 +49,7 @@ def status_json():
         sessions.append({
             'id': sid, 'mouse': e['mouse'], 'date': e['date'], 'session': e['session'],
             'status': e.get('status'), 'detail': e.get('detail'), 'ignored': bool(e.get('ignored')),
-            'n_tifs': files.get('n_tifs', 0), 'n_compressed': files.get('n_compressed', 0), 'tif_gb': round(files.get('tif_bytes', 0) / 1e9, 1),
+            'n_tifs': files.get('n_tifs', 0), 'empty_folder': files.get('empty_folder', False), 'n_compressed': files.get('n_compressed', 0), 'tif_gb': round(files.get('tif_bytes', 0) / 1e9, 1),
             'virmen': files.get('virmen', False), 'sync': bool(files.get('sync')), 'filter_stacks': files.get('filter_stacks', {}),
             'done_at': out.get('adata_time'),
             'job': e.get('job'), 'has_log': bool(out.get('log')), 'qc_report': out.get('qc_report', False), 'movie': out.get('movie', False),
@@ -290,6 +290,9 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Confirmation does not match the session name.')
                 entry, n_tifs, n_sync, nbytes = pipeline.delete_raw(*session_parts(sid.split('/')), by='dashboard')
                 return self._send(200, {'n_tifs': n_tifs, 'n_sync': n_sync, 'gb': round(nbytes / 1e9, 1), 'status': entry['status']})
+            if parts == ['api', 'delete_folder']:
+                folder = pipeline.delete_empty_folder(*session_parts(body.get('id', '').split('/')), by='dashboard')
+                return self._send(200, {'folder': folder})
             if parts == ['api', 'ignore']:
                 mouse, date, session = session_parts(body.get('id', '').split('/'))
                 entry = pipeline.set_ignored(mouse, date, session, ignored=bool(body.get('ignored', True)), by='dashboard')
@@ -564,6 +567,7 @@ function row(s) {
   const act = s.ignored ? null : action(s);
   const btn = act ? `<button class="act" data-op="queue" data-id="${esc(s.id)}" data-force="${act[1]}" data-confirm="${esc(act[2] || '')}">${act[0]}</button>` : '';
   const busy = s.status === 'running' || s.status === 'pending';
+  const rmdir = s.empty_folder && !busy ? `<button class="danger" data-op="rmdir" data-id="${esc(s.id)}" title="The session's TIFF folder has no files, only empty subfolders. Remove it and drop the session from the dashboard.">Delete empty folder</button>` : '';
   const ign = s.ignored
     ? `<button data-op="restore" data-id="${esc(s.id)}" title="Move back to the Sessions tab">Restore</button>${
        (s.n_tifs || s.sync) ? `<button class="danger" data-op="delete" data-id="${esc(s.id)}" title="Permanently delete this session's TIFFs and sync file">Delete TIFFs/Sync</button>` : ''}`
@@ -575,7 +579,7 @@ function row(s) {
       PROBLEM.has(s.status) ? `<a class="detail" href="/files/${s.id}" target="_blank" rel="noopener" title="Open the list of files in this session's folders">${esc(s.detail)}<span class="go">↗</span></a>` : `<div class="detail">${esc(s.detail)}${s.status === 'done' && s.done_at ? ` · ${new Date(s.done_at * 1000).toLocaleString([], {month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'})}` : ''}</div>`}</td>
     <td>${qc}</td>
     <td>${job}${eta}${log}</td>
-    <td><div class="actions">${btn}${ign}</div></td></tr>`;
+    <td><div class="actions">${btn}${rmdir}${ign}</div></td></tr>`;
 }
 
 function render() {
@@ -653,6 +657,16 @@ document.addEventListener('click', async ev => {
   if (b.dataset.confirm && !confirm(b.dataset.confirm)) return;
   const op = b.dataset.op, id = b.dataset.id;
   if (op === 'delete') return deleteRaw(b, id);
+  if (op === 'rmdir') {
+    if (!confirm(`Remove the empty folder of ${id}? It contains no files, only empty subfolders. The session will disappear from the dashboard.`)) return;
+    b.disabled = true;
+    try {
+      const r = await fetch('/api/delete_folder', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id})});
+      const res = await r.json(); if (!r.ok) throw new Error(res.error);
+      message(`Removed ${res.folder}.`);
+    } catch (e) { message(`${id}: ${e.message}`, true); }
+    return load();
+  }
   b.disabled = true; message(op === 'queue' ? `Submitting ${id}…` : op === 'ignore' ? `Ignoring ${id}…` : `Restoring ${id}…`);
   try {
     const [url, body] = op === 'queue' ? ['/api/queue', {id, force: b.dataset.force === 'true'}] : ['/api/ignore', {id, ignored: op === 'ignore'}];

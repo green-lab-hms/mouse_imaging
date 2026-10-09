@@ -97,6 +97,12 @@ def _files(directory, pattern):
     except FileNotFoundError:
         return []
 
+def folder_is_empty(directory):
+    """True if directory exists and contains no files at any depth (only empty subfolders, or nothing)."""
+    if not os.path.isdir(directory):
+        return False
+    return not any(files for _, _, files in os.walk(directory))
+
 def check_files(mouse, date, session):
     """Presence, size and modification time of the session's TIFF, ViRMEn and sync files."""
     raw_root = config.get_path('raw_root')
@@ -117,6 +123,7 @@ def check_files(mouse, date, session):
     all_files = tifs + virmen + sync + filter_tifs
     return {
         'n_tifs': len(tifs),
+        'empty_folder': folder_is_empty(session_dir),
         'n_compressed': len(tifs) - len(plain),
         'tif_bytes': sum(st.st_size for _, st in tifs),
         'filter_stacks': {os.path.basename(d): len(_files(d, is_tif)) for d in filter_dirs},
@@ -314,7 +321,7 @@ def scan(submit_jobs=True, verbose=False):
                 entry['tif_checked_snapshot'] = files['snapshot']
             status, detail = evaluate(entry, files, out, now, state['auto_start_date'], s['quiet_minutes'])
             entry.update(snapshot=files['snapshot'], status=status, detail=detail, checked=now,
-                         files={k: files[k] for k in ['n_tifs', 'n_compressed', 'tif_bytes', 'filter_stacks', 'filter_bytes', 'virmen', 'sync', 'last_modified']},
+                         files={k: files[k] for k in ['n_tifs', 'empty_folder', 'n_compressed', 'tif_bytes', 'filter_stacks', 'filter_bytes', 'virmen', 'sync', 'last_modified']},
                          outputs=out)
 
         if submit_jobs:
@@ -412,6 +419,30 @@ def delete_raw(mouse, date, session, by='dashboard'):
                                  'session': sid, 'bytes': nbytes, 'files': deleted}) + '\n')
     print(f'Deleted {len(tifs)} TIFFs and {len(sync)} sync file(s) of {sid} ({nbytes / 1e9:.1f} GB)')
     return scan(submit_jobs=False)['sessions'][sid], len(tifs), len(sync), nbytes
+
+def delete_empty_folder(mouse, date, session, by='dashboard'):
+    """
+    Remove a session's raw TIFF folder (<raw_root>/twophoton/<mouse>/<date>/<session>) if it contains no files, only
+    empty subfolders, and forget the session. Uses rmdir, which fails on anything that isn't empty.
+    """
+    sid = session_id(mouse, date, session)
+    folder = config.get_path('raw_root') / 'twophoton' / mouse / date / session
+    with locked_state() as state:
+        entry = state['sessions'].get(sid, {})
+        if entry.get('status') in ('running', 'pending'):
+            raise ValueError(f'{sid} has a {entry["status"]} job.')
+        if not folder_is_empty(folder):
+            raise ValueError(f'{folder} is not empty (or does not exist); nothing was deleted.')
+        for root, dirs, _ in os.walk(folder, topdown=False):
+            for d in dirs:
+                os.rmdir(os.path.join(root, d))
+        os.rmdir(folder)
+        state['sessions'].pop(sid, None)
+        with open(Path(settings()['state_dir']) / 'deletions.log', 'a') as fh:
+            fh.write(json.dumps({'time': time.strftime('%Y-%m-%d %H:%M:%S'), 'by': by, 'user': os.environ.get('USER'),
+                                 'session': sid, 'removed_empty_folder': str(folder)}) + '\n')
+    print(f'Removed empty folder {folder}')
+    return str(folder)
 
 def status_table(state=None):
     import pandas as pd
