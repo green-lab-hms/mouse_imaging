@@ -55,13 +55,44 @@ To use the environment in Jupyter or VS Code notebooks, register it as a kernel 
 python -m ipykernel install --user --name mouse_imaging --display-name "Python (mouse_imaging)"
 ```
 
+## Configuration
+
+The package needs to know where raw data is and where to write preprocessed data. The built-in defaults are the green lab's paths on spinoza, so lab members on spinoza don't need to configure anything.
+
+On another system, create a config file with your paths:
+
+```bash
+mkdir -p ~/.config/mouse_imaging
+cp config.example.toml ~/.config/mouse_imaging/config.toml   # from the repo; or create the file by hand
+```
+
+```toml
+# ~/.config/mouse_imaging/config.toml
+[paths]
+raw_root = "/path/to/raw"           # contains twophoton/, virmen/ and sync/
+derived_root = "/path/to/derived"   # preprocessing output: <mouse>/<date>/<session>/
+```
+
+Settings are read from the first of these that exists:
+1. the file named by the `MOUSE_IMAGING_CONFIG` environment variable, e.g. a shared lab config: `export MOUSE_IMAGING_CONFIG=/shared/mouse_imaging.toml`
+2. `~/.config/mouse_imaging/config.toml`
+3. the built-in defaults
+
+A config file only needs the keys it changes; the rest keep their defaults. If a configured folder doesn't exist, loading or preprocessing stops with an error naming the setting and the config file it came from. To see which settings are in use:
+
+```bash
+python -c "from mouse_imaging import config; print(config.describe_source()); print(config.load_config())"
+```
+
+On a new cluster, also check the `#SBATCH` lines at the top of `preprocess.slurm`: partition, CPUs, memory and time limit. You can edit them, or override them when submitting, e.g. `sbatch -p <partition> preprocess.slurm ...`. The script uses the `conda` on your `PATH`. If batch jobs can't find it, pass your conda location: `sbatch --export=ALL,CONDA_BASE=/path/to/miniforge3 preprocess.slurm ...`.
+
 ## How it works
 
 ### Pipeline
 
 ```
- Raw data (/data/green_lab/shared/data/raw)                Derived data (/data/green_lab/shared/data/derived/twophoton)
- ──────────────────────────────────────────                ───────────────────────────────────────────────────────────
+ Raw data (<raw_root>)                                     Derived data (<derived_root>/<mouse>/<date>/<session>/)
+ ─────────────────────                                     ──────────────────────────────────────────────────────
 
  twophoton/<mouse>/<date>/<session>/*.tif ──┐
    ScanImage TIFFs, all planes and channels │   Step 1: suite2p
@@ -129,11 +160,11 @@ A **session** is one recording: one continuous ScanImage acquisition with its ma
 | `session` | `session_1` | Recording folder for that day; defaults to `session_1` |
 
 For example, `JG6 260929 session_2` reads:
-- `raw/twophoton/JG6/260929/session_2/*.tif`
-- `raw/virmen/JG6/260929/session_2/sessionData.mat`
-- `raw/sync/JG6/260929/session_002.EDR` (same number, zero-padded)
+- `<raw_root>/twophoton/JG6/260929/session_2/*.tif`
+- `<raw_root>/virmen/JG6/260929/session_2/sessionData.mat`
+- `<raw_root>/sync/JG6/260929/session_002.EDR` (same number, zero-padded)
 
-It writes to `derived/twophoton/JG6/260929/session_2/`. Raw data has to be in this folder structure before preprocessing.
+It writes to `<derived_root>/JG6/260929/session_2/`. Raw data has to be in this folder structure before preprocessing.
 
 Preprocessing has two steps, which can be run together or separately:
 
@@ -194,6 +225,7 @@ See [examples/example_session.ipynb](examples/example_session.ipynb) for a full 
 | `options.py` | | `default_ops()` settings, activity preprocessing, cell-type calling |
 | `analysis.py` | `an` | Binning, tuning, event-triggered activity, regression |
 | `plot_jg.py` | `pl` | Plotting: fields of view, cells, binned and triggered activity |
+| `config.py` | | System settings: data locations, read from the config file |
 | `functions.py` | `fc` | Low-level helpers: file readers (EDR, ABF, H5), indexing, filtering |
 | `tmaze.py`, `wideLinearTrack.py`, `behavior.py` | | Maze-specific behavior variables |
 | `photostimulation.py`, `behavior_photostim.py` | `ps`, `bp` | Holographic photostimulation analysis |

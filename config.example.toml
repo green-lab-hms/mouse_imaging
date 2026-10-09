@@ -1,0 +1,19 @@
+# mouse_imaging configuration
+#
+# Copy this file to ~/.config/mouse_imaging/config.toml and edit the paths for your system:
+#     mkdir -p ~/.config/mouse_imaging
+#     cp config.example.toml ~/.config/mouse_imaging/config.toml
+# Or point the MOUSE_IMAGING_CONFIG environment variable at a copy, e.g. a shared lab config:
+#     export MOUSE_IMAGING_CONFIG=/path/to/config.toml
+#
+# Keys you leave out keep their built-in defaults (the green lab's spinoza paths).
+
+[paths]
+# Raw data, organized as twophoton/, virmen/ and sync/ subfolders:
+#   <raw_root>/twophoton/<mouse>/<date>/<session>/*.tif
+#   <raw_root>/virmen/<mouse>/<date>/<session>/sessionData.mat
+#   <raw_root>/sync/<mouse>/<date>/session_00N.EDR
+raw_root = "/data/green_lab/shared/data/raw"
+
+# Preprocessing output: <derived_root>/<mouse>/<date>/<session>/ (suite2p/, adata.h5ad)
+derived_root = "/data/green_lab/shared/data/derived/twophoton"

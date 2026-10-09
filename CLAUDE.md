@@ -13,7 +13,7 @@ The code was originally written for the HMS O2 cluster (`/n/data2/...`, `/n/scra
 - Conda env: `mouse_imaging`, at `~/.conda/envs/mouse_imaging`, with suite2p 1.1 and torch. The package is installed in editable mode (`pip install -e .`), so code changes take effect without reinstalling.
 - Install: `conda env create -f environment.yml` creates the env and runs `pip install -e .[suite2p,notebook]`. Into an existing env, run `pip install -e .` (core) or `pip install -e ".[suite2p]"` (preprocessing). Dependencies are in `pyproject.toml`.
 - The repo root *is* the package: `pyproject.toml` maps it with `package-dir = {"mouse_imaging" = "."}` instead of using a `src/` layout. A regular (non-editable) `pip install .` or `pip wheel .` fails when run inside the repo on the network share (`Directory not empty` when cleaning up `build/`); build from a copy on local disk if you need a wheel.
-- Activate on spinoza: `source /molbio/hpc/apps/miniforge3/etc/profile.d/conda.sh && conda activate mouse_imaging`
+- Activate on spinoza: `conda activate mouse_imaging`. Conda is at `/molbio/hpc/apps/miniforge3` and is on `PATH`, including in batch jobs. `preprocess.slurm` uses `eval "$(conda shell.bash hook)"` rather than a hard-coded conda path.
 - Cluster: SLURM, a single node `spinoza` (partition `defq`, 96 CPUs, about 250 GB RAM, **no GPU**, so suite2p/cellpose run with `torch_device='cpu'`).
 - There are no tests, linter or build step. To check your changes, import the module and run the relevant script:
   ```bash
@@ -33,17 +33,17 @@ The code was originally written for the HMS O2 cluster (`/n/data2/...`, `/n/scra
 
 ## Data layout
 
-Roots are set in `options.default_ops()`; `session.define_path()` builds every file path from them:
+The two data roots are system settings, read by `config.py` from the first of: the file named by `$MOUSE_IMAGING_CONFIG`, `~/.config/mouse_imaging/config.toml`, or the built-in `config.DEFAULTS` (the spinoza paths below). `config.example.toml` documents the keys. `options.default_ops()` copies them into `ops['raw_root']` / `ops['preprocessed_root']`. `session.define_path()` checks that they exist and builds every file path from them. Keep machine-specific paths in the config file, not in `options.py`; `options.py` is for analysis and rig settings.
 
-- Raw: `/data/green_lab/shared/data/raw/{twophoton,virmen,sync}/<mouse>/<date>/<session>/`
-- Derived: `/data/green_lab/shared/data/derived/twophoton/<mouse>/<date>/<session>/`, containing `suite2p/plane0..N/`, `adata.h5ad` and `session.pickle`
+- Raw (`raw_root`, default `/data/green_lab/shared/data/raw`): `{twophoton,virmen,sync}/<mouse>/<date>/<session>/`
+- Derived (`derived_root`, default `/data/green_lab/shared/data/derived/twophoton`): `<mouse>/<date>/<session>/`, containing `suite2p/plane0..N/`, `adata.h5ad` and `session.pickle`
 - Sync files are WinEDR `.EDR` files (`functions.import_edr`), with channels `ScanImageTrigger` (frame clock), `Virmen` (one pulse per ViRMEn iteration), `Lick detection` and unconnected `Ground` channels. Older sessions used `.abf`/`.h5`.
 
 Sessions are identified by a key dict, `{'mouse', 'date', 'session'}`. Dates are `YYMMDD` strings and sessions are `session_N`. Raw TIFF filenames encode acquisition info, for example `920nm_G1R1_V1_L123_00001_00001.tif` gives wavelength, emission filters (color+number pairs), region and depth. `parse_si_filename` parses these names.
 
 ## Architecture
 
-**Configuration ("ops").** `options.py` defines `default_ops()`, a plain dict holding paths, behavior constants, sync column mapping, ViRMEn column names and `ops['suite2p_settings']`. That last one holds **only nested overrides** to suite2p 1.x `default_settings()`; `preprocess.suite2p_settings()` merges them and picks the torch device. Variants are selected by function name: scripts take `--ops <name>` and call `getattr(options, name)()`. `options.py` also holds cell-type calling and post-processing functions (`call_celltypes_*`, `process_*`), and `session.main` finds these through `ops['process_fcn']`. `default_ops` imports nothing, so analysis-only environments don't need suite2p or torch. Even `from suite2p.parameters import ...` runs suite2p's `__init__`, which loads the whole package and torch, about 8 s. Step 2 reads the baseline settings suite2p actually used from `suite2p/settings.npy`.
+**Configuration ("ops").** `options.py` defines `default_ops()`, a plain dict holding the data roots (from `config`), behavior constants, sync column mapping, ViRMEn column names and `ops['suite2p_settings']`. That last one holds **only nested overrides** to suite2p 1.x `default_settings()`; `preprocess.suite2p_settings()` merges them and picks the torch device. Variants are selected by function name: scripts take `--ops <name>` and call `getattr(options, name)()`. `options.py` also holds cell-type calling and post-processing functions (`call_celltypes_*`, `process_*`), and `session.main` finds these through `ops['process_fcn']`. `default_ops` imports nothing, so analysis-only environments don't need suite2p or torch. Even `from suite2p.parameters import ...` runs suite2p's `__init__`, which loads the whole package and torch, about 8 s. Step 2 reads the baseline settings suite2p actually used from `suite2p/settings.npy`.
 
 **Metadata.** `session.get_metadata(path)` reads the ScanImage header of the first raw TIFF (`parse_si_metadata` flattens it into `'SI.hX.y'` keys) and exposes `nslices`, `nflyback`, `nchannels`, `Ly`, `Lx` and `volume_rate`. Multi-element SI values such as `[1;2]` stay strings. Use these derived keys rather than raw SI keys for slice counts: in ScanImage 2026, `SI.hStackManager.numSlices` is 1 for fast-z stacks, `actualNumSlices` holds the real count, and `SI.hFastZ.numFramesPerVolume` no longer exists.
 

@@ -1,14 +1,11 @@
-import os
-from pathlib import Path
+from mouse_imaging import config
 
 def default_ops(imaging=True, env=None, maze=None): # env is the mouse_imaging module computing maze variables, e.g. 'tmaze'. None skips this step
     ops = {}
-    ops['user'] = os.path.expanduser('~').split('/')[-1]
     
-    # directories
-    ops['raw_root'] = Path('/data/green_lab/shared/data/raw')
-    ops['preprocessed_root'] = Path('/data/green_lab/shared/data/derived/twophoton')
-    ops['code_dir'] = Path(f"/home/green_lab/{ops['user']}/code")
+    # directories, set per system in the mouse_imaging config file (see config.py)
+    ops['raw_root'] = config.get_path('raw_root')
+    ops['preprocessed_root'] = config.get_path('derived_root')
 
     
     ops['ball_diam_cm'] = 20.32

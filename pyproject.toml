@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "mouse_imaging"
 version = "0.1.0"
 description = "Two-photon imaging and ViRMEn behavior preprocessing and analysis"
-requires-python = ">=3.10"
+requires-python = ">=3.11" # tomllib
 dependencies = [
     "numpy",
     "scipy",

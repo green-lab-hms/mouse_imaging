@@ -11,6 +11,7 @@ from ScanImageTiffReader import ScanImageTiffReader
 
 from mouse_imaging import functions as fc
 from mouse_imaging import options
+from mouse_imaging import config
 
 
 import matplotlib.pyplot as plt
@@ -182,9 +183,10 @@ def update_metadata(adata):
 def define_path(mouse=None, date=None, session='session_1', ops=None, makedir=False, recompute=False, update=True):
     if ops is None:
         ops = options.default_ops()
+    config.check_dir(ops['raw_root'], 'raw_root')
+    config.check_dir(ops['preprocessed_root'], 'derived_root')
     path = {}
     # Preprocessed output
-    path['code_dir'] = ops['code_dir']
     path['raw_root'] = ops['raw_root']
     path['preprocessed_root'] = ops['preprocessed_root']
     path['preprocessed_dir'] = path['preprocessed_root'] / mouse / date / session
