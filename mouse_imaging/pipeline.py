@@ -159,13 +159,44 @@ def job_states(job_ids):
     job_ids = [str(j) for j in job_ids if j]
     if not job_ids:
         return {}
-    out = subprocess.run(['sacct', '-n', '-X', '-P', '-o', 'JobID,State,Elapsed', '-j', ','.join(job_ids)],
+    out = subprocess.run(['sacct', '-n', '-X', '-P', '-o', 'JobID,State,Elapsed,Start', '-j', ','.join(job_ids)],
                          capture_output=True, text=True).stdout
     states = {}
     for line in out.strip().splitlines():
-        job_id, state, elapsed = line.split('|')
-        states[job_id] = {'state': state.split()[0], 'elapsed': elapsed}
+        job_id, state, elapsed, start = line.split('|')
+        try:
+            start = time.mktime(time.strptime(start, '%Y-%m-%dT%H:%M:%S'))
+        except ValueError:
+            start = None  # 'Unknown' while pending
+        states[job_id] = {'state': state.split()[0], 'elapsed': elapsed, 'elapsed_s': _seconds(elapsed), 'start': start}
     return states
+
+def _seconds(elapsed):
+    """sacct Elapsed ('[D-]HH:MM:SS') in seconds."""
+    days, _, hms = elapsed.rpartition('-')
+    h, m, s = (int(x) for x in hms.split(':'))
+    return (int(days) if days else 0) * 86400 + h * 3600 + m * 60 + s
+
+# Processing time scales with the TIFF size. Until a pipeline job has finished, estimate from JG6/260929
+# (41 GB of TIFFs, 18.5 min for suite2p + anndata + qc, two runs, CPU only).
+DEFAULT_MIN_PER_GB = 0.45
+
+def minutes_per_gb(state):
+    """Median processing rate of the last 20 completed pipeline jobs."""
+    rates = [h['elapsed_s'] / 60 / h['gb'] for h in state.get('job_history', [])[-20:] if h.get('gb')]
+    return float(sorted(rates)[len(rates) // 2]) if rates else DEFAULT_MIN_PER_GB
+
+def estimate(entry, state, now=None):
+    """Expected processing time of a session and, for a running job, minutes left. None if no TIFFs."""
+    gb = entry.get('files', {}).get('tif_bytes', 0) / 1e9
+    if not gb:
+        return None
+    total = max(3.0, minutes_per_gb(state) * gb)
+    job = entry.get('job') or {}
+    if entry.get('status') == 'running' and job.get('start'):
+        elapsed = ((now or time.time()) - job['start']) / 60
+        return {'total_min': total, 'remaining_min': total - elapsed, 'finish': job['start'] + total * 60}
+    return {'total_min': total}
 
 def conda_base():
     if os.environ.get('CONDA_BASE'):
@@ -240,9 +271,15 @@ def scan(submit_jobs=True, verbose=False):
         sessions = state['sessions']
         # Refresh job states
         states = job_states([e['job']['id'] for e in sessions.values() if e.get('job')])
+        history = state.setdefault('job_history', [])
         for entry in sessions.values():
             if entry.get('job') and entry['job']['id'] in states:
                 entry['job'].update(states[entry['job']['id']])
+                job = entry['job']
+                # Remember how long finished jobs took, for the dashboard's time estimates
+                if job['state'] == 'COMPLETED' and not job.get('recorded') and entry.get('files', {}).get('tif_bytes'):
+                    history.append({'id': job['id'], 'gb': entry['files']['tif_bytes'] / 1e9, 'elapsed_s': job['elapsed_s']})
+                    job['recorded'] = True
 
         for mouse, date, session in discover_sessions():
             sid = session_id(mouse, date, session)

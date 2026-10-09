@@ -484,14 +484,11 @@ def load_as_vr(mouse=None, date=None, session='session_1', ops=None):
     path = define_path(mouse=mouse, date=date, session=session, ops=ops)
     return load_vr(path['virmen_mat'], columns=ops['virmen_mat_columns'])
 
-def load_as_session(mouse=None, date=None, session='session_1', ops=None, recompute=False):
+def load_as_session(mouse=None, date=None, session='session_1', ops=None):
+    """Build the Session object (about a minute). Sessions are saved as adata.h5ad only, not pickled."""
     if ops is None:
         ops = options.default_ops()
-    path = define_path(mouse=mouse, date=date, session=session, ops=ops)
-    if os.path.isfile(path['session_pickle']) and not recompute:
-        return fc.load_pickle(path['session_pickle'])
-    else:
-        return Session(mouse=mouse, date=date, session=session, ops=ops)
+    return Session(mouse=mouse, date=date, session=session, ops=ops)
 
 def load_as_anndata(mouse=None, date=None, session='session_1', adata_filekey='adata_h5ad', ops=None, recompute=False, save=True, skip_if_not_saved=True):
     if ops is None:
@@ -930,10 +927,6 @@ class Session(object):
 
         t6 = time.perf_counter()
         print('Time to compute env variables: %.2f s.' %(t6-t5))
-
-        fc.save_pickle(self, path['session_pickle'])
-        t7 = time.perf_counter()
-        print('Time to save pickle: %.2f s.' %(t7-t6))
 
         print(self)
 

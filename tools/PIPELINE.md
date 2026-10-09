@@ -36,6 +36,8 @@ Ready sessions recorded **on or after the auto-start date** are submitted automa
 
 **Ignore** (under each session's button) moves a session to the small **Ignored** tab at the right, e.g. a test recording or one you'll never process. Ignored sessions keep updating their status but are never processed automatically, and they don't count in the status tiles. **Restore** brings one back. Running sessions can't be ignored.
 
+The **Job** column estimates how long processing takes: time left and expected finish time for a running job, and total time for other sessions. The estimate comes from the TIFF size and how long finished jobs took per GB, so it improves as more sessions are processed. Two jobs running at once can each take longer.
+
 The **QC** column shows the cell and R+ counts, behavior time and QC flags from `qc_summary.json`, e.g. `z drift`, `R+ cells`, `suite2p log`. Hover over a flag to see the full warning. **QC report ↗** opens the PDF in a new tab.
 
 ## Open the dashboard

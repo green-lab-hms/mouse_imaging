@@ -11,7 +11,7 @@ To keep it running with a permanent web address, see tools/dashboard_service.sh 
 The server only listens on this machine (127.0.0.1) and requires the access token in the URL, so other users on the
 node can't submit jobs as you. The token is kept in ~/.config/mouse_imaging/dashboard_token.
 """
-import json, re, secrets, mimetypes
+import json, re, secrets, mimetypes, time
 from pathlib import Path
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -32,6 +32,16 @@ def get_token():
 
 def status_json():
     state = pipeline.read_state()
+    now = time.time()
+    # Refresh running and pending jobs live, so estimates don't wait for the next scan (not written to state.json)
+    active = {e['job']['id']: e for e in state['sessions'].values() if e.get('status') in ('running', 'pending') and e.get('job')}
+    for job_id, live in pipeline.job_states(list(active)).items():
+        e = active[job_id]
+        e['job'].update(live)
+        if live['state'] == 'RUNNING':
+            e['status'], e['detail'] = 'running', f'SLURM job {job_id} running'
+        elif live['state'] not in pipeline.ACTIVE_JOB_STATES:
+            e['detail'] = f'SLURM job {job_id} {live["state"].lower()}; updating at the next scan'
     sessions = []
     for sid, e in sorted(state['sessions'].items()):
         files, out = e.get('files', {}), e.get('outputs', {})
@@ -44,6 +54,7 @@ def status_json():
             'job': e.get('job'), 'has_log': bool(out.get('log')), 'qc_report': out.get('qc_report', False),
             'qc_warnings': qc.get('warnings', []), 'n_cells': qc.get('n_cells'), 'n_red': qc.get('n_red'),
             'behavior_min': qc.get('behavior_min'),
+            'eta': pipeline.estimate(e, state, now) if e.get('status') in ('running', 'pending', 'queued', 'not_queued') else None,
         })
     s = pipeline.settings()
     return {'last_scan': state.get('last_scan'), 'auto_start_date': state.get('auto_start_date'),
@@ -221,6 +232,7 @@ td:first-child .small { white-space: nowrap; }
 .flag { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--warning-bg); color: var(--text); border: 1px solid var(--warning); cursor: help; white-space: nowrap; }
 .flag::before { content: "\26A0\FE0E  "; color: var(--warning); }
 .qcok { color: var(--good); font-size: 12px; font-weight: 600; }
+.eta { color: var(--accent); white-space: nowrap; cursor: help; }
 a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
 .tabs { display: flex; align-items: flex-end; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
 .tab { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 6px 10px; color: var(--text-2); font-weight: 600; margin-bottom: -1px; }
@@ -290,6 +302,19 @@ function action(s) {
   return null;
 }
 
+const mins = m => m >= 90 ? `${(m / 60).toFixed(1)} h` : `${Math.max(1, Math.round(m))} min`;
+function etaText(s) {
+  const e = s.eta;
+  if (!e) return '';
+  const tip = 'Estimated from the TIFF size and how long finished jobs took per GB';
+  if (e.remaining_min != null) {
+    if (e.remaining_min < 1) return `<div class="small eta" title="${tip}">finishing soon (estimate ${mins(e.total_min)})</div>`;
+    const t = new Date(e.finish * 1000).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+    return `<div class="small eta" title="${tip}">~${mins(e.remaining_min)} left · done ~${t}</div>`;
+  }
+  return `<div class="small eta" title="${tip}">takes ~${mins(e.total_min)}</div>`;
+}
+
 function row(s) {
   const st = STATUS[s.status] || {label: s.status, icon: '?'};
   const files = `<div class="files">
@@ -305,7 +330,8 @@ function row(s) {
     const link = s.qc_report ? `<div><a href="/qc/${s.id}" target="_blank" rel="noopener">QC report ↗</a></div>` : '';
     qc = counts + flags + link;
   }
-  const job = s.job ? `<div class="num">${esc(s.job.id)}</div><div class="small">${esc((s.job.state || '').toLowerCase())}${s.job.elapsed ? ' · ' + esc(s.job.elapsed) : ''}</div>` : '<span class="muted">—</span>';
+  const job = s.job ? `<div class="num">${esc(s.job.id)}</div><div class="small">${esc((s.job.state || '').toLowerCase())}${s.job.elapsed ? ' · ' + esc(s.job.elapsed) : ''}</div>` : (s.eta ? '' : '<span class="muted">—</span>');
+  const eta = etaText(s);
   const log = s.has_log ? `<div><a class="small" href="/log/${s.id}" target="_blank" rel="noopener">Log ↗</a></div>` : '';
   const act = s.ignored ? null : action(s);
   const btn = act ? `<button data-op="queue" data-id="${esc(s.id)}" data-force="${act[1]}" data-confirm="${esc(act[2] || '')}">${act[0]}</button>` : '';
@@ -318,7 +344,7 @@ function row(s) {
     <td>${files}</td>
     <td><span class="badge s-${esc(s.status)}"><span class="i" aria-hidden="true">${st.icon}</span>${st.label}</span><div class="small">${esc(s.detail)}</div></td>
     <td>${qc}</td>
-    <td>${job}${log}</td>
+    <td>${job}${eta}${log}</td>
     <td><div class="actions">${btn}${ign}</div></td></tr>`;
 }
 
