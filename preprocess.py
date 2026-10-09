@@ -17,7 +17,7 @@ def main(mouse, date, session='session_1', ops_name='default_ops'):
         'input_format': 'tif',
         'nplanes': md['nslices'] + md['nflyback'], # each tiff has these many planes in sequence, including flyback frames
         'nchannels': md['nchannels'], # each tiff has these many channels per plane
-        'keep_movie_raw': True,
+        'keep_movie_raw': False,
         'batch_size': 200, # we will decrease the batch_size in case low RAM on computer
         'functional_chan': 1,
         'ignore_flyback': list(range(md['nslices'], md['nslices'] + md['nflyback'])), # 0-based plane indices of flyback frames

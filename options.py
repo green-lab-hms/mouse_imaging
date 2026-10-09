@@ -45,7 +45,7 @@ def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
         settings['tau'] = 1.25 # timescale of gcamp to use for deconvolution
         settings['torch_device'] = 'cuda' if torch.cuda.is_available() else 'cpu' # use GPU if available for faster processing
         settings['diameter'] = [6, 6] # check
-        settings['run']['multiplane_parallel'] = True
+        settings['run']['multiplane_parallel'] = False
         settings['io']['delete_bin'] = True
         settings['registration']['align_by_chan2'] = False
         settings['registration']['do_bidiphase'] = True
