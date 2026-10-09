@@ -939,6 +939,7 @@ class Session(object):
         # Check if frames number is different in sync vs tif
         assert len(self.X) == len(self.layers['dF'])
         scan_tif_frame_diff = len(scan2vr_idx) - len(self.X)
+        self.uns['qc'] = {'sync_volumes': len(scan2vr_idx), 'suite2p_volumes': len(self.X), 'sync_minus_suite2p_volumes': int(scan_tif_frame_diff)}
         if np.abs(scan_tif_frame_diff)> 0:
             print(f'{scan_tif_frame_diff} frames difference between ScanImage triggers and tif files.')
 

@@ -172,21 +172,34 @@ For example, `JG6 260929 session_2` reads:
 
 It writes to `<derived_root>/JG6/260929/session_2/`. Raw data has to be in this folder structure before preprocessing.
 
-Preprocessing has two steps, which can be run together or separately:
+Preprocessing has three steps, which can be run together or separately:
 
 | Step | Does | Output |
 |---|---|---|
 | `suite2p` | Motion correction, cell detection, fluorescence extraction and deconvolution. Slow: about 20 minutes on CPU for the 22-minute, 3-plane test session (JG6/260929). | `suite2p/plane0..N/` |
 | `anndata` | Aligns suite2p output with behavior and sync, measures cell properties and saves the AnnData. About 1 minute. | `adata.h5ad` |
+| `qc` | Writes a QC report: session info, recording time, cell and R+ cell counts, registration and drift plots, and warnings. Seconds. | `qc_report.pdf` |
+
+**Check `qc_report.pdf` after preprocessing.** Page 1 summarizes the session and lists warnings. Page 2 plots registration shifts, registration quality and cell brightness over time. Page 3 shows the mean images. A warning is listed when:
+- **Slow lateral drift:** the smoothed rigid shift moves more than 3 px.
+- **Bad frames:** suite2p flagged more than 1% of frames.
+- **Registration quality drops:** registration correlation falls more than 20% from the start to the end, a sign of z drift.
+- **Brightness changes:** cells' mean fluorescence changes more than 30% (z drift, bleaching or laser power).
+- **Residual motion:** suite2p's residual motion after registration (`regDX`) exceeds 1 px.
+- **Frame counts don't match:** the sync file and suite2p disagree on the number of imaging volumes.
+- **Red cell calls look wrong:** more than 90% of cells are R+, suggesting the red cell call isn't working.
+- **suite2p logged a problem:** its log contains an `ERROR` or `WARNING` line.
+
+The thresholds are in `options.default_ops()['qc']`.
 
 On spinoza, from the repo directory, or anywhere if you copy `preprocess.slurm`:
 
 ```bash
 sbatch preprocess.slurm <mouse> <date> [session] [steps]
 # e.g.
-sbatch preprocess.slurm JG6 260929                     # both steps, session_1
-sbatch preprocess.slurm JG6 260929 session_2           # both steps, the day's second session
-sbatch preprocess.slurm JG6 260929 session_1 anndata   # rebuild adata.h5ad only, from existing suite2p output
+sbatch preprocess.slurm JG6 260929                     # all steps, session_1
+sbatch preprocess.slurm JG6 260929 session_2           # all steps, the day's second session
+sbatch preprocess.slurm JG6 260929 session_1 anndata,qc   # rebuild adata.h5ad and the QC report from existing suite2p output
 ```
 
 The script runs `python -m mouse_imaging.preprocess`, which you can also call directly:
@@ -226,7 +239,8 @@ See [examples/example_session.ipynb](examples/example_session.ipynb) for a full 
 
 | Module | Alias | Contents |
 |---|---|---|
-| `preprocess.py` | | Command-line pipeline: step 1 `suite2p`, step 2 `anndata` |
+| `preprocess.py` | | Command-line pipeline: step 1 `suite2p`, step 2 `anndata`, step 3 `qc` |
+| `qc.py` | | QC report (`qc_report.pdf`, `qc_summary.json`): session summary, registration and drift checks |
 | `session.py` | `sess` | Paths, metadata, sync, `Session` assembly, loading AnnData |
 | `options.py` | | `default_ops()` settings, activity preprocessing, cell-type calling |
 | `analysis.py` | `an` | Binning, tuning, event-triggered activity, regression |

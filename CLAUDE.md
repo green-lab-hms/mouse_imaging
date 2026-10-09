@@ -24,7 +24,7 @@ The code was originally written for the HMS O2 cluster (`/n/data2/...`, `/n/scra
 
 | Command | What it does |
 |---|---|
-| `sbatch preprocess.slurm <mouse> <date> [session] [steps]` | Runs `preprocess.py`: step `suite2p` (all planes together), then step `anndata` (builds the `Session` and AnnData and saves `adata.h5ad`). `steps` is comma-separated and defaults to `suite2p,anndata`; pass `anndata` to rebuild the AnnData without rerunning suite2p. The log goes to `preprocess_<jobid>.log` in the directory you submit from. |
+| `sbatch preprocess.slurm <mouse> <date> [session] [steps]` | Runs `preprocess.py`: step `suite2p` (all planes together), then step `anndata` (builds the `Session` and AnnData and saves `adata.h5ad`), then step `qc` (`qc.py` writes `qc_report.pdf`). `steps` is comma-separated and defaults to `suite2p,anndata,qc`; pass `anndata,qc` to rebuild without rerunning suite2p. The log goes to `preprocess_<jobid>.log` in the directory you submit from. |
 | `python -m mouse_imaging.preprocess --mouse M --date D --steps anndata` | The same as above for step 2 only, run directly. It takes a few minutes, so it doesn't need SLURM. The SLURM script uses this module form too, so it works without a clone. |
 | `python session.py --mouse M --date D --update` | Re-runs `update_function` (photostim influence, tuning, regressions) on an existing `adata.h5ad`. |
 | `sbatch tools/vscode.sh [tunnel_name]` | Starts a VS Code tunnel job (1 CPU, 4 GB, 12 h by default). The login code and tunnel link are written to `~/vscode.out`. The current Claude Code session itself usually runs inside such a job; don't start a second tunnel with the same name, because that disconnects the running one. Step-by-step guide: `tools/README.md`. |
@@ -61,6 +61,8 @@ Sessions are identified by a key dict, `{'mouse', 'date', 'session'}`. Dates are
 
 `session.main` then applies `select_cells` (`isnotclipped`, `isnotnearedge`, `iscell`) and saves `adata.h5ad`.
 
+**QC (`qc.py`).** `compute_qc(adata, ops)` reads each plane's suite2p `ops.npy`: rigid shifts `xoff`/`yoff`, registration correlation `corrXY`, `badframes` and `regDX`. It also reads `F.npy` for the selected cells, suite2p's `run.log` for ERROR/WARN lines, and `adata.uns['qc']`, the sync vs suite2p volume counts stored by `Session._sync_activity`. It compares them with `ops['qc']` thresholds. `write_report` renders a 3-page PDF with matplotlib `PdfPages`. The movie binaries are deleted after suite2p (`delete_bin=True`), so QC can only use saved per-frame metrics, not the movie.
+
 **Downstream.** `analysis.py` (binning, triggered averages `trigger_*`, tuning, regression), `photostimulation.py` (target/source matching, influence metrics), `plot_jg.py` (plots) and `behavior.py`/`behavior_photostim.py` (behavior-only sessions) all work on `AnnData` objects or VR DataFrames. Functions that take `obs_key` / `var_key` filter rows with a dict of column→value (`functions.fetch_index`).
 
 **Package import.** Keep `import mouse_imaging` fast. Slow libraries such as `umap` (about 7 s), `suite2p` and `torch` are imported inside the functions that need them. `__init__.py` imports the submodules under short aliases (`sess`, `an`, `pl`, `ps`, `bp`), and some modules rely on `from mouse_imaging import *` or `from mouse_imaging import sess`. Several modules call `importlib.reload(...)` on their dependencies at import time to support notebook workflows.
@@ -76,5 +78,5 @@ Sessions are identified by a key dict, `{'mouse', 'date', 'session'}`. Dates are
   - the `sbatch_*` helpers (they point at `~/code/preprocess_2p`)
   - `plot_jg.py` photostim plots (`plot_target_locations*`), which still read `meanRef`. `specificity_vs_cutoff` no longer filters on `B_spatial_corr`; that came from cellpose and is commented out with a TODO.
   - `plot_animation.slurm` (O2 conda path)
-- With `detection.chan2_threshold=0.25`, suite2p's `redcell` flag was True for nearly all ROIs on JG6/260929, where `redcell_prob` ranged about 0.44–0.79. Use `redcell_prob` or `R`, or retune the threshold.
+- suite2p 1.1.0 bug: cellpose red cell detection (`cellpose_chan2=True`) always failed with `KeyError: 'chan2_params'` (defaults name it `params_chan2`), and suite2p silently fell back to intensity-based red cell calls. That made `redcell` True for nearly all ROIs on JG6/260929, where `redcell_prob` ranged about 0.44–0.79. `options.py` now sets `detection.cellpose_settings.chan2_params` as a workaround. Sessions processed before the fix need the `suite2p` step rerun to get cellpose-based `redcell`. The QC report flags both the log error and an implausible R+ fraction.
 - `options.default_ops()` uses `np` from an `import numpy as np` further down the module. This works only because the function is called after the module has finished loading.

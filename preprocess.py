@@ -2,7 +2,7 @@ import suite2p
 from suite2p.run_s2p import logger_setup
 from mouse_imaging import *
 
-STEPS = ['suite2p', 'anndata']
+STEPS = ['suite2p', 'anndata', 'qc']
 
 def suite2p_settings(overrides):
     """
@@ -56,6 +56,11 @@ def main(mouse, date, session='session_1', ops_name='default_ops', steps=STEPS):
     # Step 2: align suite2p output with sync and virmen data, and save as anndata
     if 'anndata' in steps:
         sess.main(mouse, date, session, ops=ops)
+
+    # Step 3: QC report (qc_report.pdf): session summary, cell counts, registration and drift warnings
+    if 'qc' in steps:
+        from mouse_imaging import qc
+        qc.main(mouse, date, session, ops=ops)
 
 if __name__ == '__main__':
     import argparse

@@ -44,7 +44,10 @@ def default_ops(imaging=True, env=None, maze=None): # env is the mouse_imaging m
                              'do_bidiphase': True},
             'detection': {'threshold_scaling': 2.0, # we are increasing the threshold for finding ROIs to limit the number of non-cell ROIs found (sometimes useful in gcamp injections)
                           'chan2_threshold': 0.25,
-                          'cellpose_chan2': True},
+                          'cellpose_chan2': True,
+                          # Workaround for a suite2p 1.1.0 bug: defaults name this 'params_chan2' but detection reads 'chan2_params',
+                          # so cellpose on channel 2 fails with a KeyError and suite2p silently falls back to intensity-based red cell calls
+                          'cellpose_settings': {'chan2_params': None}},
             'extraction': {'neuropil_extract': True,
                            'neuropil_coefficient': 0.7},
             'dcnv_preprocess': {'baseline': 'maximin'},
@@ -54,7 +57,19 @@ def default_ops(imaging=True, env=None, maze=None): # env is the mouse_imaging m
         ops['do_nneighbor_graph'] = True
         ops['do_umap'] = True
         ops['do_leiden'] = True
-        
+
+        # QC report thresholds (qc.py): a warning is listed when a session crosses one
+        ops['qc'] = {
+            'drift_window_s': 60, # smoothing window for slow trends
+            'max_lateral_drift_px': 3, # range of the smoothed rigid shift over the session
+            'max_badframe_frac': 0.01, # fraction of frames suite2p flagged as bad
+            'max_corr_drop': 0.2, # fractional drop in registration correlation, start vs end
+            'max_brightness_change': 0.3, # fractional change in cells' mean fluorescence, start vs end
+            'max_regdx_px': 1.0, # suite2p residual motion after registration (regDX)
+            'max_red_frac': 0.9, # fraction of cells called R+; above this the red cell threshold is suspect
+            'max_volume_mismatch': 1, # sync vs suite2p volume count
+        }
+
     # vr
     ops['is_vr_playback'] = False
     ops['do_median_trajectory'] = False
