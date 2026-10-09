@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import scipy.ndimage.morphology
 import pyabf
@@ -326,3 +327,49 @@ def import_h5(h5_filename, rename_columns={}):
     df['dt'] = 1 / sampling_rate
     df = df.rename(rename_columns)
     return df
+
+def import_edr(edr_filename):
+    """
+    Read a WinEDR (.EDR) file: a text header of NBH bytes followed by interleaved int16 samples.
+    Returns a dataframe of channels in volts with a time column 't'.
+    """
+    with open(edr_filename, 'rb') as fh:
+        header_bytes = fh.read(2048)
+        header = {}
+        for line in header_bytes.decode('ascii', errors='ignore').replace('\x00', '').split('\r\n'):
+            if '=' in line:
+                key, val = line.split('=', 1)
+                header[key.strip()] = val.strip()
+        nbh, nc, npts = int(header['NBH']), int(header['NC']), int(header['NP'])
+        fh.seek(nbh)
+        raw = np.fromfile(fh, dtype=np.int16, count=npts).reshape(-1, nc)
+
+    adcmax, ad, dt = int(header['ADCMAX']), float(header['AD']), float(header['DT'])
+    data = {}
+    for ichan in range(nc):
+        name = header[f'YN{ichan}']
+        offset = int(header[f'YO{ichan}']) # column of this channel within each interleaved sample
+        scale = ad / (float(header[f'YCF{ichan}']) * float(header[f'YAG{ichan}']) * (adcmax + 1))
+        signal = (raw[:, offset] - float(header[f'YZ{ichan}'])) * scale
+        if name in data: # e.g. multiple 'Ground' channels
+            name = f'{name}{ichan}'
+        data[name] = signal
+    df = pd.DataFrame(data)
+    df['t'] = np.arange(len(df)) * dt
+    return df
+
+def to_h5ad_safe(obj):
+    """
+    Recursively convert an object into types that AnnData can write to h5ad: Paths to str, tuples to lists, and drop None values.
+    """
+    if isinstance(obj, dict):
+        return {str(key): to_h5ad_safe(val) for key, val in obj.items() if val is not None}
+    elif isinstance(obj, (list, tuple)):
+        items = [to_h5ad_safe(val) for val in obj if val is not None]
+        if any(isinstance(val, dict) for val in items):
+            return {str(i): val for i, val in enumerate(items)} # h5ad can't store lists of dicts
+        return items
+    elif isinstance(obj, os.PathLike):
+        return str(obj)
+    else:
+        return obj

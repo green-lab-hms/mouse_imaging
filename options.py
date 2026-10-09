@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
+def default_ops(imaging=True, env=None, maze=None): # env is the mouse_imaging module computing maze variables, e.g. 'tmaze'. None skips this step
     ops = {}
     ops['user'] = os.path.expanduser('~').split('/')[-1]
     
@@ -27,7 +27,6 @@ def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
 
         ops['filter1'] = 'filter1'
         ops['filter2']= 'filter2'
-        ops['var_filter_key'] = {'G': 'filter1'}
 
         ops['functional_chan'] = 'G'
 
@@ -38,24 +37,21 @@ def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
         ops['max_val'] = 0.95
         ops['triggers'].extend(['ScanImage'])
 
-        # suite2p
-        import suite2p, torch # imported here so analysis-only environments don't need them
-        settings = suite2p.default_settings()
-        
-        settings['tau'] = 1.25 # timescale of gcamp to use for deconvolution
-        settings['torch_device'] = 'cuda' if torch.cuda.is_available() else 'cpu' # use GPU if available for faster processing
-        settings['diameter'] = [6, 6] # check
-        settings['run']['multiplane_parallel'] = False
-        settings['io']['delete_bin'] = True
-        settings['registration']['align_by_chan2'] = False
-        settings['registration']['do_bidiphase'] = True
-        settings['detection']['threshold_scaling'] = 2.0 # we are increasing the threshold for finding ROIs to limit the number of non-cell ROIs found (sometimes useful in gcamp injections)
-        settings['detection']['chan2_threshold'] = 0.25
-        settings['detection']['cellpose_chan2'] = True
-        settings['extraction']['neuropil_extract'] = True
-        settings['extraction']['neuropil_coefficient'] = 0.7
-        settings['dcnv_preprocess']['baseline'] = 'maximin'
-        ops['suite2p_settings'] = settings
+        # suite2p: overrides to suite2p.default_settings(), merged in preprocess.py so suite2p and torch are only imported there
+        ops['suite2p_settings'] = {
+            'tau': 1.25, # timescale of gcamp to use for deconvolution
+            'diameter': [6, 6], # check
+            'run': {'multiplane_parallel': False}, # True sends planes to a remote server over ssh, not local parallelism
+            'io': {'delete_bin': True},
+            'registration': {'align_by_chan2': False,
+                             'do_bidiphase': True},
+            'detection': {'threshold_scaling': 2.0, # we are increasing the threshold for finding ROIs to limit the number of non-cell ROIs found (sometimes useful in gcamp injections)
+                          'chan2_threshold': 0.25,
+                          'cellpose_chan2': True},
+            'extraction': {'neuropil_extract': True,
+                           'neuropil_coefficient': 0.7},
+            'dcnv_preprocess': {'baseline': 'maximin'},
+        }
 
         ops['do_corrmat'] = True
         ops['do_nneighbor_graph'] = True

@@ -1273,7 +1273,7 @@ def plot_cell_footprints(adata, var_key=None, **kwargs):
     var_idx = an.fetch_index(adata.var, var_key)
     adata = adata[:, var_idx]
     nplanes = adata.uns['metadata']['nslices']
-    planes = range(1, nplanes+1)
+    planes = range(nplanes) # 0-based suite2p planes
     plt.figure(figsize=(6*nplanes, 6))
     plt.suptitle(session_title(adata), y=1.3)
     gs = mpl.gridspec.GridSpec(nrows=1, ncols=nplanes)
@@ -1283,16 +1283,16 @@ def plot_cell_footprints(adata, var_key=None, **kwargs):
         ax.set_aspect('equal')
 
 # Show images of cropped cells
-def get_img(adata, channel, plane=1, filter_key=None):
-    if filter_key is None:
-        filter_key = adata.uns['ops']['var_filter_key'][channel]
-
-    assert plane != 0 # 1-based
-    iplane = plane - 1
-
-    chan_dict = {'B': 0, 'G': 1, 'R': 2}
-    ichannel = chan_dict[channel]
-    img = imread(adata.uns['path']['meanRef'][filter_key][iplane])[:, :, ichannel]
+def get_img(adata, channel, plane=0, filter_key=None):
+    """
+    Registered mean image of one channel ('G', 'R', ...) in one 0-based plane, from suite2p ops.npy.
+    filter_key is unused, kept for compatibility.
+    """
+    channels = list(adata.uns['metadata']['filter1']['channels']) # suite2p channel 1 is the first filter channel
+    assert channel in channels, f'Channel {channel} not in {channels}'
+    mean_img_key = ['meanImg', 'meanImg_chan2'][channels.index(channel)]
+    ops_plane = np.load(adata.uns['path']['ops_npy'].format(plane=plane), allow_pickle=True).item()
+    img = ops_plane[mean_img_key]
 
     if (img == 0).all():
         warnings.warn('Image is blank.')
@@ -1460,8 +1460,14 @@ def plot_trigger_check(sync, tlim):
     plt.xlim(*tlim)
 
 def plot_top_slice(adata):
-    img = imread(adata.uns['path']['meanRef']['filter1'][0])
-    img = img / img.max() * 2
+    # RGB image of the top plane, each channel scaled to its max
+    md = adata.uns['metadata']
+    chan_dict = {'B': 2, 'G': 1, 'R': 0} # RGB order for imshow
+    img = np.zeros((md['Ly'], md['Lx'], 3))
+    for channel in md['filter1']['channels']:
+        img_chan = get_img(adata, channel, plane=0)
+        img[:, :, chan_dict[channel]] = img_chan / img_chan.max()
+    img = np.clip(img * 2, 0, 1)
     plt.imshow(img)
 
 def plot_top_slices(adatas, region='PPC'):
@@ -1481,14 +1487,14 @@ def plot_top_slices(adatas, region='PPC'):
 def plot_top_slice_corrmat(adatas, region='PPC'):
     if region is not None:
         adatas = [adata for adata in adatas if adata.uns['metadata']['region']==region]
-    images_flat = [imread(adata.uns['path']['meanRef']['filter1'][0])[:, :, 1].flatten() for adata in adatas]
+    images_flat = [get_img(adata, 'G', plane=0).flatten() for adata in adatas]
     columns = [adata.uns['metadata']['date'] for adata in adatas]
     df = pd.DataFrame(np.stack(images_flat, axis=1), columns=columns)
     sns.heatmap(df.corr(), vmin=0, vmax=1)
 
-def plot_F_raw(adata, var_key=None, plane=1, max_ncells=10):
+def plot_F_raw(adata, var_key=None, plane=0, max_ncells=10):
     plt.figure()
-    F = np.load(adata.uns['path']['F_npy'].format(plane=1), allow_pickle=True)
+    F = np.load(adata.uns['path']['F_npy'].format(plane=plane), allow_pickle=True)
     if var_key is not None:
         var_idx = an.fetch_index(adata.var, var_key)
     var_names = adata.var_names[var_idx]
@@ -1524,7 +1530,8 @@ def plot_channels(sessions, x, y, hue=None, xlim=None, ylim=None, vline=None, hl
 def specificity_vs_cutoff(sessions, maxval=None):
     if type(sessions) is not list: sessions = [sessions]
     var = an.aggr_var(sessions)
-    var = var[var['B_spatial_corr'] > 0.5]
+    # TODO: B_spatial_corr came from cellpose segmentation, which the suite2p 1.1 pipeline no longer produces
+    # var = var[var['B_spatial_corr'] > 0.5]
     cutoff = np.arange(0, 1, 0.05).astype(np.float64)
     
     maxval_computed = var['B'].dropna().sort_values()[-3:].mean()
@@ -1709,7 +1716,7 @@ def plot_photostim_triggered_traces(adata, mean=True, ylim=(0, 2.), photostim_ra
         ax.set_title(var_names[icell])
 
 def plot_photostim_targets_Fraw(adata):
-    F_npy = adata.uns['path']['F_npy'].format(plane=1)
+    F_npy = adata.uns['path']['F_npy'].format(plane=0)
     F = np.load(F_npy, allow_pickle=True)
     icells = [int(var_name.split('_source')[-1]) for var_name in adata[:, adata.var['stim_group1']].var_names]
     
@@ -1829,14 +1836,13 @@ def plot_photostim_frame_difference(adata, conditions, key='avgMov', **kwargs):
     plot_influence_image(adata, frames, t, **kwargs)
 
 # Generate correlation maps
-def generate_correlation_image_plane(adata, var_key=None, show=False, save=True, plane=1, meanref_ichan=1, corr_ichan=0):
+def generate_correlation_image_plane(adata, var_key=None, show=False, save=True, plane=0, meanref_channel='G', corr_ichan=0):
     # Initialize 3 channel image
     md = adata.uns['metadata']
     img = np.zeros((md['Ly'], md['Lx'], 3))
 
-    # Add meanref to green channel
-    meanref_file = adata.uns['path']['meanRef']['filter1'][plane-1]
-    meanref = imread(meanref_file)[:, :, meanref_ichan]
+    # Add mean image to green channel
+    meanref = get_img(adata, meanref_channel, plane=plane)
     img[:, :, 1] = meanref / meanref.max()
 
     # Color cells by correlation to mean of cells identified by var_key
@@ -1859,15 +1865,14 @@ def generate_correlation_image_plane(adata, var_key=None, show=False, save=True,
         plt.imshow(img)
     
     if save:
-        index = meanref_file.find('.tif')
-        save_file = meanref_file[:index] + '_varcorr.tif'
+        save_file = os.path.join(adata.uns['path']['suite2p_dir'], f'plane{plane}', 'meanImg_varcorr.tif')
         imwrite(save_file, img)
     return img
 
-def generate_correlation_images(adata, var_key=None, show=False, save=True, meanref_ichan=1, corr_ichan=0):
+def generate_correlation_images(adata, var_key=None, show=False, save=True, meanref_channel='G', corr_ichan=0):
     nslices = adata.uns['metadata']['nslices']
-    for plane in range(1, nslices+1):
-        generate_correlation_image_plane(adata, plane=plane, var_key=var_key, show=show, save=save, meanref_ichan=meanref_ichan, corr_ichan=corr_ichan)
+    for plane in range(nslices):
+        generate_correlation_image_plane(adata, plane=plane, var_key=var_key, show=show, save=save, meanref_channel=meanref_channel, corr_ichan=corr_ichan)
 
 # Plot images
 def tile_images(images, ncols=5, vmin=0, vmax=300, cmap=None, title=None):

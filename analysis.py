@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from numpy import pi
 from mouse_imaging import functions as fc
-import igraph, umap
+import igraph
 from sklearn.neighbors import kneighbors_graph
 from sklearn.preprocessing import StandardScaler
 import warnings
@@ -799,6 +799,7 @@ def umap_X(X, observation_axis, **umap_params):
     X_scaled = StandardScaler().fit_transform(X)
     if observation_axis == 'cell':
         X_scaled = X_scaled.T
+    import umap # imported here because it is slow to import (~7 s)
     result = umap.UMAP(**umap_params).fit_transform(X_scaled)
     return result
 

@@ -64,8 +64,8 @@ def parse_si_filename(si_tif, functional_filter='G'):
         elif re.match(regex_2filters, entry):
             metadata['filter_id'] = entry
             metadata['em_filters'] = [entry[:2], entry[2:4]]
-        elif entry != 'session' and re.match('\D', entry):
-            metadata['region'] = entry
+        elif entry != 'session' and re.match('\D', entry) and 'region' not in metadata:
+            metadata['region'] = entry # first non-numeric entry, e.g. V1 in 920nm_G1R1_V1_L123
 
     metadata['channels'] = [em_filter[0] for em_filter in metadata['em_filters']]
     if functional_filter in metadata['channels']:
@@ -85,10 +85,7 @@ def get_metadata(path, functional_filter='G', recompute=False, update=True):
     else:
         def parse_si_path(si_tif):
             metadata = {}
-            if si_tif.startswith('/n/scratch3/'):
-                mouse, date, session = si_tif.split('/')[-4:-1]
-            else:
-                mouse, date, session = si_tif.split('/')[-5:-2]
+            mouse, date, session = si_tif.split('/')[-4:-1] # .../twophoton/<mouse>/<date>/<session>/<file>.tif
             metadata['mouse'] = mouse
             metadata['date'] = date
             metadata['session'] = session
@@ -142,7 +139,7 @@ def get_metadata(path, functional_filter='G', recompute=False, update=True):
         metadata['dt'] = 1. / metadata['volume_rate']
         
         metadata['filter1'] = parse_si_filename(filter1_tif, functional_filter)
-        metadata['region'] = metadata['filter1']['region']
+        metadata['region'] = metadata['filter1'].get('region')
         
         # Parse metadata from filter2, if present
         # filter2_tif = filterx_filename(path, 'filter2')
@@ -182,7 +179,9 @@ def update_metadata(adata):
         path = adata.uns['path']
     adata.uns['metadata'] = get_metadata(path)
 
-def define_path(mouse=None, date=None, session='session_1', ops=options.default_ops(), makedir=False, recompute=False, update=True):        
+def define_path(mouse=None, date=None, session='session_1', ops=None, makedir=False, recompute=False, update=True):
+    if ops is None:
+        ops = options.default_ops()
     path = {}
     # Preprocessed output
     path['code_dir'] = ops['code_dir']
@@ -215,8 +214,15 @@ def define_path(mouse=None, date=None, session='session_1', ops=options.default_
         path['adata_h5ad_backup'] = path['preprocessed_dir'] / f'adata.h5ad.backup'
         path['adata_allsources_h5ad'] = path['preprocessed_dir'] / f'adata_allsources.h5ad'
         
-        # Suite2p output
+        path['var_pickle'] = path['preprocessed_dir'] / 'var.pickle'
+
+        # Suite2p output, one folder per plane (0-based). Format with plane=
         path['suite2p_dir'] = path['preprocessed_dir'] / 'suite2p'
+        path['suite2p_settings_npy'] = path['suite2p_dir'] / 'settings.npy' # settings suite2p ran with
+        plane_dir = str(path['suite2p_dir'] / 'plane{plane}')
+        for filekey, filename in [('F_npy', 'F.npy'), ('Fneu_npy', 'Fneu.npy'), ('spks_npy', 'spks.npy'), ('stat_npy', 'stat.npy'),
+                                  ('iscell_npy', 'iscell.npy'), ('redcell_npy', 'redcell.npy'), ('ops_npy', 'ops.npy')]:
+            path[filekey] = os.path.join(plane_dir, filename)
 
     if makedir:
         os.makedirs(path['preprocessed_dir'], exist_ok=True)
@@ -232,17 +238,14 @@ def maze_id(path, strip=True, load_if_not_saved=True, force_load=False):
         with open(path['maze_id_txt'], 'r') as fh:
             maze = fh.read()
     elif load_if_not_saved:
-        shell_script = """
-        module load matlab/2020a;
-        export MATLABPATH={code_dir}/mouse_imaging;
-        matlab -batch "printMazeName('{virmen_mat}')"
-        """.format(**path)
+        # Maze name is saved as experName in sessionData.mat
         try:
-            out = subprocess.check_output(shell_script, shell=True)
-            maze = out.decode('ascii').strip()
-        except CalledProcessError('Error in fetching virmen maze name.'):
+            mat = scipy.io.loadmat(path['virmen_mat'], variable_names=['experName'])
+            maze = str(np.squeeze(mat['experName'])).strip()
+        except (FileNotFoundError, KeyError, ValueError):
+            warnings.warn('Could not read maze name (experName) from virmen file.')
             maze = ''
-        
+
         os.makedirs(os.path.dirname(path['maze_id_txt']), exist_ok=True)
         with open(path['maze_id_txt'], 'w') as fh:
             fh.write(maze)
@@ -411,9 +414,10 @@ def preprocess_dF(path=None, ops=None, fs=None, plane=None):
     # JG 211101: Omit neuropil subtraction for dF/F because this ends up causing problems with negative baselines
     Fc = F
 
-    # Compute dF/F
-    ops['fs'] = fs
-    Fb = F_baseline(Fc, ops)
+    # Compute dF/F, with the same baseline settings suite2p used before deconvolution
+    suite2p_settings = np.load(path['suite2p_settings_npy'], allow_pickle=True).item()
+    baseline_ops = {**suite2p_settings['dcnv_preprocess'], 'fs': fs}
+    Fb = F_baseline(Fc, baseline_ops)
     Fb[Fb<=0] = np.nan
     dF = (Fc - Fb) / (Fb)
     return dF
@@ -472,18 +476,24 @@ def load_vr(session_mat, columns=None, playback=False):
     return df
 
 
-def load_as_vr(mouse=None, date=None, session='session_1', ops=options.default_ops(imaging=False)):
+def load_as_vr(mouse=None, date=None, session='session_1', ops=None):
+    if ops is None:
+        ops = options.default_ops(imaging=False)
     path = define_path(mouse=mouse, date=date, session=session, ops=ops)
     return load_vr(path['virmen_mat'], columns=ops['virmen_mat_columns'])
 
-def load_as_session(mouse=None, date=None, session='session_1', ops=options.default_ops(), recompute=False):
+def load_as_session(mouse=None, date=None, session='session_1', ops=None, recompute=False):
+    if ops is None:
+        ops = options.default_ops()
     path = define_path(mouse=mouse, date=date, session=session, ops=ops)
     if os.path.isfile(path['session_pickle']) and not recompute:
         return fc.load_pickle(path['session_pickle'])
     else:
         return Session(mouse=mouse, date=date, session=session, ops=ops)
 
-def load_as_anndata(mouse=None, date=None, session='session_1', adata_filekey='adata_h5ad', ops=options.default_ops(), recompute=False, save=True, skip_if_not_saved=True):
+def load_as_anndata(mouse=None, date=None, session='session_1', adata_filekey='adata_h5ad', ops=None, recompute=False, save=True, skip_if_not_saved=True):
+    if ops is None:
+        ops = options.default_ops()
     path = define_path(mouse=mouse, date=date, session=session, ops=ops)
     adata_file = path[adata_filekey]
     if os.path.isfile(adata_file) and not recompute:
@@ -494,7 +504,7 @@ def load_as_anndata(mouse=None, date=None, session='session_1', adata_filekey='a
             return None
         else:
             session = Session(mouse, date, session=session, ops=ops)
-            adata = anndata.AnnData(X=session.X.values, obs=session.obs, var=session.var, uns=session.uns, layers=session.layers)
+            adata = anndata.AnnData(X=session.X.values, obs=session.obs, var=session.var, uns=fc.to_h5ad_safe(session.uns), layers=session.layers)
 
             if save:
                 adata.write(adata_file)
@@ -552,7 +562,7 @@ def fetch_stat(adata=None, path=None, plane=None):
         assert path is not None
         md = get_metadata(path)
     if plane is None:
-        stat = [np.load(path['stat_npy'].format(plane=plane), allow_pickle=True) for plane in range(1, md['nslices']+1)]
+        stat = [np.load(path['stat_npy'].format(plane=plane), allow_pickle=True) for plane in range(md['nslices'])]
     else:
         stat = np.load(path['stat_npy'].format(plane=plane), allow_pickle=True)
     return stat
@@ -565,7 +575,7 @@ def fetch_cell_stat(adata=None, var_name=None, path=None, stat=None):
     if stat is None:
         stat = fetch_stat(adata=adata, path=path, plane=plane)
     else:
-        stat = stat[plane-1]
+        stat = stat[plane]
     
     stati = stat[source]
     return stati
@@ -591,7 +601,7 @@ def source_isnotclipped(adata):
     bit_depth = int(adata.uns['metadata']['SI.hChannels.channelAdcResolution'].split(' ')[0][1:]) - 1
     max_val = 2**bit_depth * adata.uns['ops']['max_val']
     
-    planes = range(1, adata.uns['metadata']['nslices']+1)
+    planes = range(adata.uns['metadata']['nslices'])
     Fs = [np.load(adata.uns['path']['F_npy'].format(plane=plane)) for plane in planes]
     isnotclipped = np.concatenate(list(map(lambda F: F.max(axis=1) < max_val, Fs)))
     print(f'Removing {(~isnotclipped).sum()} sources with peak value above {max_val}')
@@ -606,16 +616,27 @@ def source_isnotnearedge(stat, mindist=10):
     return isnotnearedge
 
 def source_iscell(self):
-    planes = range(1, self.uns['metadata']['nslices']+1)
-    iscell = np.concatenate([np.load(self.uns['path']['iscell_convnet_npy'].format(plane=plane)) for plane in planes])
-    print(f'Removing {(~iscell).sum()} sources that are not cells.')
-    return iscell
+    """
+    Suite2p classifier output, iscell.npy columns are (iscell, probability).
+    """
+    planes = range(self.uns['metadata']['nslices'])
+    iscell = np.concatenate([np.load(self.uns['path']['iscell_npy'].format(plane=plane)) for plane in planes])
+    print(f'{(iscell[:, 0] == 0).sum()} sources classified as not cells.')
+    return iscell[:, 0].astype(bool), iscell[:, 1]
+
+def source_isredcell(self):
+    """
+    Suite2p red cell detection on channel 2, redcell.npy columns are (isredcell, probability).
+    """
+    planes = range(self.uns['metadata']['nslices'])
+    redcell = np.concatenate([np.load(self.uns['path']['redcell_npy'].format(plane=plane), allow_pickle=True) for plane in planes])
+    return redcell[:, 0].astype(bool), redcell[:, 1]
 
 def select_cells(adata, criteria=['isnotclipped', 'isnotnearedge', 'iscell']):
     if 'iscell' in adata.var.columns:
-        idx = np.ones(adata.n_vars)
+        idx = np.ones(adata.n_vars, dtype=bool)
         for criterion in criteria:
-            idx = idx & adata.var[criterion]
+            idx = idx & adata.var[criterion].to_numpy(dtype=bool)
         adata = adata[:, idx]
     adata = adata[:, ~np.isnan(adata.layers['dF']).any(axis=0)]
     return adata
@@ -652,11 +673,14 @@ class Sync(object):
     
     def __init__(self, filename, metadata, ops={}):
         self.nslices = metadata['nslices']
-        suffix = filename.split('.')[-1]
+        filename = str(filename)
+        suffix = filename.split('.')[-1].lower()
         if suffix == 'abf':
             self.raw = fc.import_abf(filename)
         elif suffix == 'h5':
             self.raw = fc.import_h5(filename)
+        elif suffix == 'edr':
+            self.raw = fc.import_edr(filename)
 
         else:
             raise ValueError('File extension not supported.')
@@ -683,8 +707,13 @@ class Sync(object):
             'virmenClk': 'Virmen',
             'SIframeClk': 'ScanImage',
             'SIframeCl': 'ScanImage',
+            'ScanImageTrigger': 'ScanImage',
+            'Lick detection': 'Licks',
         }
-        return raw.rename(rename_columns, axis=1)
+        raw = raw.rename(rename_columns, axis=1)
+        # Drop unconnected ground channels
+        raw = raw.drop([col for col in raw.columns if col.startswith('Ground')], axis=1)
+        return raw
         
     def init_vr(self):
         self.vr_idx = self.get_vr_idx()
@@ -724,10 +753,12 @@ class Sync(object):
         idx_start = idx_start[scan_frame_idx]
         idx_end = idx_end[scan_frame_idx]
 
-        frames_flyback = int(metadata['SI.hFastZ.numDiscardFlybackFrames'])
-        frames_pervol = int(metadata['SI.hFastZ.numFramesPerVolume'])
-        if metadata['SI.hStackManager.numSlices'] > 1:
-            frame_idx = np.delete(idx_start, np.arange(frames_pervol-frames_flyback, idx_start.size, frames_pervol))
+        # Remove flyback frames, which come at the end of each volume
+        nslices, nflyback = metadata['nslices'], metadata['nflyback']
+        frames_pervol = nslices + nflyback
+        if nflyback > 0:
+            flyback = (np.arange(idx_start.size) % frames_pervol) >= nslices
+            frame_idx = idx_start[~flyback]
         else:
             frame_idx = idx_start
         return frame_idx
@@ -736,8 +767,7 @@ class Sync(object):
         # Compute volume acquisition metrics
         frame_idx = self.get_frame_idx(metadata)
         ntriggers = frame_idx.shape[0] # includes leftover triggers after abort
-        nslices = metadata['SI.hStackManager.numSlices']
-        # flybackframes = metadata['SI.hFastZ.numDiscardFlybackFrames']
+        nslices = metadata['nslices'] # flyback frames already removed in get_frame_idx
         nvolumes = int(np.floor(ntriggers / nslices))
         nframes = int(nvolumes * nslices)
         
@@ -778,8 +808,10 @@ class Sync(object):
         
 
 class Session(object):
-    def __init__(self, mouse=None, date=None, session='session_1', ops=options.default_ops()):
+    def __init__(self, mouse=None, date=None, session='session_1', ops=None):
         # Define path, metadata, parameters
+        if ops is None:
+            ops = options.default_ops()
         self.uns = {}
         self.uns['path'] = path = define_path(mouse=mouse, date=date, session=session, ops=ops)
         self.uns['metadata'] = metadata = get_metadata(path)
@@ -805,7 +837,7 @@ class Session(object):
         self.stat = self._load_stat()
 
         # Load activity
-        self.X = self._load_activity('oasis')
+        self.X = self._load_activity('spks')
         self.layers = {'dF': self._load_activity('dF').to_numpy(),
                         'dcnv': self.X}
         self._sync_activity()
@@ -817,16 +849,13 @@ class Session(object):
         t4 = time.perf_counter()
         print('Time to compute obs: %.2f s.' %(t4-t3))
 
-        # Load mean images (hyperstacks) to get channel intensities
-        self.img = self._load_hyperstacks(path['meanRef'])
-
-        # Load cellpose segmentation
-        self.seg = self._load_cellpose_seg()
+        # Load suite2p mean images to get channel intensities
+        self.img = self._load_mean_imgs()
 
         # Compute var df
         self.var = self._var(dilation=ops['dilation'])
         t5 = time.perf_counter()
-        print('Time to load hyperstacks, cellpose segmentation and compute var: %.2f s.' %(t5-t4))
+        print('Time to load mean images and compute var: %.2f s.' %(t5-t4))
 
         # Extract and process photostim data
         if ops['is_photostim']:
@@ -877,20 +906,13 @@ class Session(object):
     def _load_activity(self, signal):
         activity_ls = []
         columns = []
-        planes = range(1, self.uns['metadata']['nslices']+1)
+        planes = range(self.uns['metadata']['nslices']) # 0-based suite2p planes, excludes flyback
         for plane in planes:
             if signal == 'dF':
                 dF = preprocess_dF(path=self.uns['path'], ops=self.uns['ops'], fs=self.uns['metadata']['volume_rate'], plane=plane)
                 activity_slicei = dF
-            elif signal == 'oasis':
-                oasis_file = self.uns['path']['Fc_oasis_mat'].format(plane=plane, baseline=self.uns['ops']['baseline'])
-                try:
-                    mat = scipy.io.loadmat(oasis_file)
-                    activity_slicei = mat['S']
-                except NotImplementedError:
-                    import h5py
-                    with h5py.File(oasis_file, 'r') as f:
-                        activity_slicei = np.array(f['S']).T
+            elif signal == 'spks':
+                activity_slicei = np.load(self.uns['path']['spks_npy'].format(plane=plane)) # suite2p deconvolved activity
             columns.extend([f'plane{plane}_source{isource}' for isource in range(len(activity_slicei))])
             activity_ls.append(activity_slicei)
         
@@ -937,11 +959,11 @@ class Session(object):
     def _load_stat(self, xmargin=10, ymargin=10):
         Ly, Lx = self.uns['metadata']['Ly'], self.uns['metadata']['Lx']
         stat_ls = []
-        planes = range(1, self.uns['metadata']['nslices']+1)
+        planes = range(self.uns['metadata']['nslices'])
         for plane in planes:
             stat_slicei = np.load(self.uns['path']['stat_npy'].format(plane=plane), allow_pickle=True)
             for stati in stat_slicei: 
-                stati['slice'] = plane
+                stati['slice'] = plane # 0-based
 
                 # Compute min distance to edge
                 min_dist_to_edge = min(stati['xpix'].min(), Lx - stati['xpix'].max(), 
@@ -1014,67 +1036,27 @@ class Session(object):
         obs = obs[:len(self.X)]
         return obs
 
-    def _load_hyperstacks(self, meanref_dict):
-        hyperstacks = {}
-        for filter_key, tif_files in meanref_dict.items():
-            hyperstacks[filter_key] = load_hyperstack(tif_files)
-        return hyperstacks
-
-    def _load_cellpose_seg(self):
+    def _load_mean_imgs(self):
         """
-        Not fully generalized to index filter1/2 and raw/demixed. Currently just indexes by emission color, prioritizing filter2, and then demixed.
+        Registered mean image of each channel from suite2p ops.npy, shape (nplanes, nchannels, Ly, Lx).
+        Channel order follows the filter in the tif filename, e.g. G1R1 -> ['G', 'R'], with the functional channel as suite2p channel 1.
         """
-        seg = {}
-        for filter_key in sorted(self.uns['path']['cellpose'].keys(), reverse=True): # prioritize filter2, then demixed
-            for channel, seg_npys in self.uns['path']['cellpose'][filter_key].items():
-                channel_color = chan_dict_r[int(channel[-1])-1]
-                if channel_color not in seg.keys():
-                    seg[channel_color] = [np.load(seg_npy, allow_pickle=True).item()['masks'] for seg_npy in seg_npys]
-        return seg
-
-    def cell_spatial_corr(self, seg_chan, erode=2):
-        corr = pd.Series(np.nan, index=self.X.columns)
-        mode = pd.Series('', index=self.X.columns)
-        for icell, stati in enumerate(self.stat):
-            cell_mask = np.zeros((self.uns['metadata']['Ly'], self.uns['metadata']['Lx']))
-            cell_mask[stati['ypix'], stati['xpix']] = 1
-            seg = self.seg[seg_chan][stati['slice']-1]
-            seg_id = scipy.stats.mode(seg[stati['ypix'], stati['xpix']], axis=None).mode
-            seg_mask = seg==seg_id
-            if erode:
-                seg_mask = scipy.ndimage.binary_erosion(seg_mask, iterations=erode)
-            corr.iloc[icell] = scipy.stats.pearsonr(cell_mask.flatten(), seg_mask.flatten())[0]
-            mode.iloc[icell] = 'plane{plane}_cell{seg_id}'.format(plane=stati['slice'], seg_id=seg_id)
-
-        # Find cells that are assigned more than once
-        mode_val, count = np.unique(mode, return_counts=True)
-        mode_nonunique = mode_val[count > 1]
-        mode_nonunique = np.array([modei for modei in mode_nonunique if modei[-5:]!='cell0' and modei!=''])
-
-        duplicate = pd.Series(False, index=self.X.columns, dtype=bool)
-        for modei in mode_nonunique:
-            icells = np.where(mode == modei)[0]
-            corri = corr.iloc[icells]
-            duplicate_ind = np.delete(icells, np.argmax(corri)) #icells[~np.argmax(corri)] - changed 220406 but did not re-run data. was only removing one duplicate (most common case) instead of all duplicates. turns out that thresholding on spatial correlation > 0.6 removes the vast majority of duplicates anyways.
-            duplicate.iloc[duplicate_ind] = True
-        corr[duplicate] = 0
-        return corr
+        md = self.uns['metadata']
+        mean_img_keys = ['meanImg', 'meanImg_chan2'][:md['nchannels']]
+        img = np.zeros((md['nslices'], md['nchannels'], md['Ly'], md['Lx']))
+        for plane in range(md['nslices']):
+            ops_plane = np.load(self.uns['path']['ops_npy'].format(plane=plane), allow_pickle=True).item()
+            for ichannel, key in enumerate(mean_img_keys):
+                img[plane, ichannel] = ops_plane[key]
+        return img
 
     def get_img(self, channel, plane, filter_key=None):
         """
-        When filter_key is None, prioritizes image from filter2, then demixed.
+        Mean image of one channel ('G', 'R', ...) in one 0-based plane. filter_key is unused, kept for compatibility.
         """
-        if filter_key is None:
-            for filter_key in sorted(self.img.keys(), reverse=True): # prioritize filter2, then demixed
-                filter_metadata = self.uns['metadata'][filter_key.split('_')[0]]
-                if channel in filter_metadata['channels']:
-                    break # filter_key will be the one that matches above if statement
-
-        assert plane != 0 # 1-based
-        assert channel in self.uns['metadata'][filter_key.split('_')[0]]['channels'] # check channel is present
-        
-        ichannel = chan_dict[channel]
-        img = self.img[filter_key][plane-1, ichannel]
+        channels = self.uns['metadata']['filter1']['channels']
+        assert channel in channels # check channel is present
+        img = self.img[plane, channels.index(channel)]
 
         if (img == 0).all():
             warnings.warn('Requested image is blank.')
@@ -1086,15 +1068,14 @@ class Session(object):
 
         # Compute intensity for each channel
         for channel in self.uns['metadata']['available_channels']:
-            var[channel] = self._cell_means(channel, **dilation, filter_key=self.uns['ops']['var_filter_key'][channel])
-        
-        # Compute spatial correlation with channel segmentation
-        for chan, seg in self.seg.items():
-            var[chan + '_spatial_corr'] = self.cell_spatial_corr(chan, erode=2)
+            var[channel] = self._cell_means(channel, **dilation)
 
         var['isnotclipped'] = source_isnotclipped(self)
         var['isnotnearedge'] = source_isnotnearedge(self.stat, mindist=self.uns['ops']['min_dist_to_edge'])
-        var['iscell'] = source_iscell(self)
+        var['iscell'], var['iscell_prob'] = source_iscell(self)
+        if self.uns['metadata']['nchannels'] > 1:
+            var['redcell'], var['redcell_prob'] = source_isredcell(self)
+        var['plane'] = [stati['slice'] for stati in self.stat]
 
         # Add median cell coordinates
         assert len(self.stat) == len(var)
@@ -1195,8 +1176,9 @@ class Session(object):
             filename = 'session.wsync.pickle'
         fc.save_pickle(obj, os.path.join(self.uns['path']['preprocessed_dir'], filename))
 
-def main(mouse, date, session='session_1', ops=options.default_ops(), recompute=True, save=True):
-    
+def main(mouse, date, session='session_1', ops=None, recompute=True, save=True):
+    if ops is None:
+        ops = options.default_ops()
     adata = load_as_anndata(mouse=mouse, date=date, session=session, ops=ops, adata_filekey='adata_allsources_h5ad', recompute=recompute, save=False, skip_if_not_saved=False)
     adata = select_cells(adata)
     t0 = time.perf_counter()
@@ -1204,7 +1186,7 @@ def main(mouse, date, session='session_1', ops=options.default_ops(), recompute=
     if 'process_fcn' in ops.keys():
         process = getattr(options, ops['process_fcn'])
         ops = adata.uns['ops']
-        adata = process(adata, do_corrmat=ops['do_corrmat'], do_nneighbor_graph=ops['do_nneighbor_graph'], do_umap=ops['do_nneighbor_graph'], do_leiden=ops['do_leiden'])
+        adata = process(adata, do_corrmat=ops['do_corrmat'], do_nneighbor_graph=ops['do_nneighbor_graph'], do_umap=ops['do_umap'], do_leiden=ops['do_leiden'])
 
     # Compute average photostim frames
     # if adata.uns['ops']['is_photostim']:

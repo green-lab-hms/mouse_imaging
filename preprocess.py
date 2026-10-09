@@ -2,10 +2,25 @@ import suite2p
 from suite2p.run_s2p import logger_setup
 from mouse_imaging import *
 
-def main(mouse, date, session='session_1', ops_name='default_ops'):
-    path = sess.define_path(mouse, date, session)
-    md = sess.get_metadata(path)
-    ops = getattr(options, ops_name)()
+STEPS = ['suite2p', 'session']
+
+def suite2p_settings(overrides):
+    """
+    Merge nested overrides from ops['suite2p_settings'] into suite2p's default settings.
+    """
+    import torch
+    def update(settings, overrides):
+        for key, val in overrides.items():
+            if isinstance(val, dict):
+                update(settings[key], val)
+            else:
+                settings[key] = val
+    settings = suite2p.default_settings()
+    update(settings, overrides)
+    settings['torch_device'] = 'cuda' if torch.cuda.is_available() else 'cpu' # use GPU if available for faster processing
+    return settings
+
+def run_suite2p(path, md, ops):
     tif_files = list(path['twophoton_dir'].glob('*.tif'))
     assert len(tif_files) > 0
 
@@ -23,11 +38,24 @@ def main(mouse, date, session='session_1', ops_name='default_ops'):
         'ignore_flyback': list(range(md['nslices'], md['nslices'] + md['nflyback'])), # 0-based plane indices of flyback frames
     }
 
-    settings = ops['suite2p_settings']
+    settings = suite2p_settings(ops['suite2p_settings'])
     settings['fs'] = md['volume_rate'] # sampling rate of recording, determines binning for cell detection
 
     logger_setup(path['suite2p_dir'])
     suite2p.run_s2p(settings=settings, db=db)
+
+def main(mouse, date, session='session_1', ops_name='default_ops', steps=STEPS):
+    ops = getattr(options, ops_name)()
+    path = sess.define_path(mouse, date, session, ops=ops)
+    md = sess.get_metadata(path)
+
+    # Step 1: motion correction, ROI detection, extraction and deconvolution
+    if 'suite2p' in steps:
+        run_suite2p(path, md, ops)
+
+    # Step 2: align suite2p output with sync and virmen data, and save as anndata
+    if 'session' in steps:
+        sess.main(mouse, date, session, ops=ops)
 
 if __name__ == '__main__':
     import argparse
@@ -36,5 +64,9 @@ if __name__ == '__main__':
     parser.add_argument('--date', required=True, type=str)
     parser.add_argument('--session', required=False, type=str, default='session_1')
     parser.add_argument('--ops', required=False, type=str, default='default_ops')
+    parser.add_argument('--steps', required=False, type=str, default=','.join(STEPS),
+                        help=f"Comma-separated steps to run, from: {','.join(STEPS)}")
     args = parser.parse_args()
-    main(args.mouse, args.date, args.session, ops_name=args.ops)
+    steps = args.steps.split(',')
+    assert set(steps) <= set(STEPS), f'Unknown step in {steps}'
+    main(args.mouse, args.date, args.session, ops_name=args.ops, steps=steps)
