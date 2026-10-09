@@ -180,7 +180,7 @@ Preprocessing has four steps, which can be run together or separately:
 
 | Step | Does | Output |
 |---|---|---|
-| `suite2p` | Motion correction, cell detection, fluorescence extraction and deconvolution. Slow: about 20 minutes on CPU for the 22-minute, 3-plane test session (JG6/260929). | `suite2p/plane0..N/` |
+| `suite2p` | Motion correction, cell detection, fluorescence extraction and deconvolution, plus `movie.mp4`, a sped-up preview of the motion-corrected recording (about a minute, a few MB). Slow: about 20 minutes on CPU for the 22-minute, 3-plane test session (JG6/260929). | `suite2p/plane0..N/` |
 | `filters` | Motion-corrects the extra stacks in `filter*` subfolders of the raw session, e.g. `filter2` (blue and green, 850 nm) and `filter1_1024` (the session's filters at 1024 × 1024), and saves their time-averaged images. Skipped if there are none. A few minutes. | `filter2/mean.tif`, `filter1_1024/mean.tif` |
 | `anndata` | Aligns suite2p output with behavior and sync, measures cell properties and saves the AnnData. About 1 minute. | `adata.h5ad` |
 | `qc` | Writes a QC report: session info, recording time, cell and R+ cell counts, registration and drift plots, and warnings. Seconds. | `qc_report.pdf` |

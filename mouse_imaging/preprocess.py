@@ -1,4 +1,4 @@
-import json, time, logging
+import copy, json, time, logging
 from pathlib import Path
 import numpy as np
 import suite2p
@@ -58,7 +58,82 @@ def _run_s2p(data_dir, suite2p_dir, md, ops, registration_only=False):
             handler.close()
 
 def run_suite2p(path, md, ops):
-    _run_s2p(path['twophoton_dir'], path['suite2p_dir'], md, ops)
+    # Keep the registered binaries until the preview movie is made, then delete them as suite2p would
+    ops = copy.deepcopy(ops)
+    delete_bin = ops['suite2p_settings'].setdefault('io', {}).get('delete_bin', True)
+    ops['suite2p_settings']['io']['delete_bin'] = False
+    try:
+        _run_s2p(path['twophoton_dir'], path['suite2p_dir'], md, ops)
+        try:
+            make_movie(path['suite2p_dir'], md, path['movie_mp4'])
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            print('Preview movie failed; continuing without it.')
+    finally:
+        if delete_bin:
+            for plane_dir in Path(path['suite2p_dir']).glob('plane*'):
+                for name in ['data.bin', 'data_chan2.bin']:
+                    if (plane_dir / name).is_file():
+                        (plane_dir / name).unlink()
+
+def make_movie(suite2p_dir, md, out_file, target_s=60, fps=30, tile=256, crf=28):
+    """
+    Sped-up preview of the registered recording (functional channel) as a small H.264 MP4, playable in any browser.
+    Planes are tiled in a grid, each downsampled to about tile x tile px. Frames are averaged in bins so the whole
+    recording plays in about target_s seconds at fps frames/s. Reads suite2p's registered plane*/data.bin.
+    Encoded with the ffmpeg bundled in imageio-ffmpeg; crf sets quality vs file size (higher = smaller).
+    """
+    import math, subprocess, cv2, imageio_ffmpeg
+    planes = []
+    for plane in range(md['nslices']):
+        ops_plane = np.load(Path(suite2p_dir) / f'plane{plane}' / 'ops.npy', allow_pickle=True).item()
+        bin_file = Path(suite2p_dir) / f'plane{plane}' / 'data.bin'
+        nframes, Ly, Lx = int(ops_plane['nframes']), int(ops_plane['Ly']), int(ops_plane['Lx'])
+        planes.append(np.memmap(bin_file, dtype=np.int16, mode='r', shape=(nframes, Ly, Lx)))
+    nframes = min(len(m) for m in planes)
+    Ly, Lx = planes[0].shape[1:]
+    nbin = max(1, math.ceil(nframes / (fps * target_s)))
+    n_out = nframes // nbin
+    down = max(1, round(Ly / tile))
+    ty, tx = Ly // down, Lx // down
+    ncols = min(len(planes), 3)
+    nrows = math.ceil(len(planes) / ncols)
+    H, W = nrows * ty + 24, ncols * tx  # 24 px strip for the time stamp
+    H, W = H + H % 2, W + W % 2
+    speed = nbin * fps / md['volume_rate']
+
+    # Contrast per plane from a sample of binned frames
+    sample = np.linspace(0, n_out - 1, min(n_out, 50)).astype(int)
+    lims = []
+    for m in planes:
+        vals = np.stack([m[i * nbin:(i + 1) * nbin].mean(0)[::down, ::down] for i in sample])
+        lims.append((np.percentile(vals, 1), np.percentile(vals, 99.7)))
+
+    Path(out_file).parent.mkdir(parents=True, exist_ok=True)
+    tmp = Path(out_file).with_suffix('.tmp.mp4')
+    ffmpeg = subprocess.Popen([imageio_ffmpeg.get_ffmpeg_exe(), '-y', '-loglevel', 'error',
+                               '-f', 'rawvideo', '-pix_fmt', 'gray', '-s', f'{W}x{H}', '-r', str(fps), '-i', '-',
+                               '-c:v', 'libx264', '-preset', 'veryfast', '-crf', str(crf), '-pix_fmt', 'yuv420p',
+                               '-movflags', '+faststart', str(tmp)], stdin=subprocess.PIPE)
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    for i in range(n_out):
+        frame = np.zeros((H, W), np.uint8)
+        for p, m in enumerate(planes):
+            img = m[i * nbin:(i + 1) * nbin].mean(0)
+            img = img[:ty * down, :tx * down].reshape(ty, down, tx, down).mean(axis=(1, 3))
+            lo, hi = lims[p]
+            r, c = divmod(p, ncols)
+            frame[r * ty:(r + 1) * ty, c * tx:(c + 1) * tx] = np.clip((img - lo) / (hi - lo + 1e-9) * 255, 0, 255).astype(np.uint8)
+            cv2.putText(frame, f'plane {p}', (c * tx + 6, r * ty + 16), font, 0.4, 255, 1, cv2.LINE_AA)
+        t = i * nbin / md['volume_rate']
+        cv2.putText(frame, f'{int(t // 60):02d}:{int(t % 60):02d}   {speed:.0f}x speed', (6, H - 7), font, 0.45, 255, 1, cv2.LINE_AA)
+        ffmpeg.stdin.write(frame.tobytes())
+    ffmpeg.stdin.close()
+    if ffmpeg.wait() != 0:
+        raise RuntimeError(f'ffmpeg failed with exit code {ffmpeg.returncode}')
+    tmp.replace(out_file)
+    print(f'Preview movie saved to {out_file} ({n_out} frames, {speed:.0f}x speed, {Path(out_file).stat().st_size / 1e6:.1f} MB)')
 
 def run_filters(path, ops):
     """

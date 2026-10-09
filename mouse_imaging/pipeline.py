@@ -160,6 +160,7 @@ def outputs(mouse, date, session):
         'derived_dir': str(derived),
         'adata': (derived / 'adata.h5ad').exists(),
         'qc_report': (derived / 'qc_report.pdf').exists(),
+        'movie': (derived / 'movie.mp4').exists(),
         'qc': qc,
         'log': str(logs[-1]) if logs else None,
     }

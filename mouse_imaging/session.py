@@ -219,6 +219,7 @@ def define_path(mouse=None, date=None, session='session_1', ops=None, makedir=Fa
         path['metadata_pickle'] = path['preprocessed_dir'] / 'metadata.pickle'
         path['session_pickle'] = path['preprocessed_dir'] / 'session.pickle'
         path['adata_h5ad'] = path['preprocessed_dir'] / f'adata.h5ad'
+        path['movie_mp4'] = path['preprocessed_dir'] / 'movie.mp4' # sped-up preview of the registered recording
         path['adata_h5ad_backup'] = path['preprocessed_dir'] / f'adata.h5ad.backup'
         path['adata_allsources_h5ad'] = path['preprocessed_dir'] / f'adata_allsources.h5ad'
         
