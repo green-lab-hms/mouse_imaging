@@ -34,3 +34,7 @@ notebook = ["ipykernel"]
 # The repository root is the mouse_imaging package itself
 packages = ["mouse_imaging"]
 package-dir = {"mouse_imaging" = "."}
+
+[tool.setuptools.package-data]
+# The SLURM script that pipeline.py submits
+mouse_imaging = ["preprocess.slurm"]

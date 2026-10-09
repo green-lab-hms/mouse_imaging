@@ -241,6 +241,7 @@ See [examples/example_session.ipynb](examples/example_session.ipynb) for a full 
 |---|---|---|
 | `preprocess.py` | | Command-line pipeline: step 1 `suite2p`, step 2 `anndata`, step 3 `qc` |
 | `qc.py` | | QC report (`qc_report.pdf`, `qc_summary.json`): session summary, registration and drift checks |
+| `pipeline.py` | | Automatic preprocessing: finds new sessions, checks uploads are complete, submits jobs (run by cron) |
 | `session.py` | `sess` | Paths, metadata, sync, `Session` assembly, loading AnnData |
 | `options.py` | | `default_ops()` settings, activity preprocessing, cell-type calling |
 | `analysis.py` | `an` | Binning, tuning, event-triggered activity, regression |
