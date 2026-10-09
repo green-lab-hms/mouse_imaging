@@ -1,28 +1,32 @@
 import os
+from pathlib import Path
 
 def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
     ops = {}
-    ops['user'] = user = os.path.expanduser('~').split('/')[-1]
+    ops['user'] = os.path.expanduser('~').split('/')[-1]
+    
+    # directories
+    ops['raw_root'] = Path('/data/green_lab/shared/data/raw')
+    ops['preprocessed_root'] = Path('/data/green_lab/shared/data/derived/twophoton')
+    ops['code_dir'] = Path(f"/home/green_lab/{ops['user']}/code")
+
+    
     ops['ball_diam_cm'] = 20.32
     ops['ball_circumference_cm'] = ops['ball_diam_cm'] * np.pi
     ops['cm_per_virmen_unit'] = ops['ball_circumference_cm'] / 86
     ops['imaging'] = imaging
     ops['env'] = env
     ops['maze'] = maze
-    ops['preprocessed_root'] = [
-        '/n/data2/hms/neurobio/harvey/jonathan/data/imaging',
-        '/n/data2/hms/neurobio/harvey/Sst44_shared/data/imaging',
-    ]
+    
     ops['triggers'] = []
     ops['is_photostim'] = False
-    ops['raw_root'] = f"/n/scratch/users/{user[0]}/{user}/Behavior_Imaging_Data"
+    
         
     if imaging:
-        ops['convnet_mat'] = f"/home/{user}/code/source_classifier_syt/convNet_l23_171216.mat"
+        # ops['convnet_mat'] = f"/home/{user}/code/source_classifier_syt/convNet_l23_171216.mat"
 
-        ops['filter1_regex'] = 'filter1'
-        ops['filter2_regex']= None
-        ops['filter3_regex']= None
+        ops['filter1'] = 'filter1'
+        ops['filter2']= 'filter2'
         ops['var_filter_key'] = {'G': 'filter1'}
 
         ops['functional_chan'] = 'G'
@@ -52,8 +56,6 @@ def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
         }
 
         # Oasis
-        # JG 211101: changed 'maximin' to 'constant_prctile' because maximin was causing elevated baseline estimates during long transients
-        # JG 220125: changed back to 'maximin' because some cells had real shifting baseline
         ops['baseline'] = 'maximin' 
         ops['prctile_baseline'] = 8
         ops['win_baseline'] = 60.0
@@ -78,8 +80,8 @@ def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
                 'Ball_yaw': -1,
                 'Reward': 1,}
 
-    ops['sync_offsets'] = {'Ball_pitc': 1.494,
-                    'Ball_roll': 1.4965,
+    ops['sync_offsets'] = {'Ball_pitc': 1.5,
+                    'Ball_roll': 1.5,
                     'Ball_yaw': 1.5,
                   'Reward': 0}
 
@@ -87,199 +89,6 @@ def default_ops(imaging=True, env='tmaze', maze='cued_tmaze'):
                     'Ball_roll': 'roll',
                     'Ball_yaw': 'yaw',
                  'Reward': 'sync_reward'}
-    return ops
-
-def maximin_baseline_ops(imaging=True):
-    ops = default_ops(imaging=True,)
-    ops['baseline'] = 'maximin'
-    return ops
-
-def constant_prctile_baseline_ops(imaging=True):
-    ops = default_ops(imaging=True,)
-    ops['baseline'] = 'constant_prctile'
-    return ops   
-
-def ChRmine_GR_ops(**kwargs):
-    ops = default_ops(imaging=True, **kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= 'filter2*'
-    ops['filter3_regex'] = 'filter3*'
-
-    ops['var_filter_key'] = {'G': 'filter1', 'R': 'filter3_reg'}
-    return ops
-
-def ChRmine_GR_stim_ops(**kwargs):
-    ops = default_ops(imaging=True, **kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= 'filter2*'
-    ops['filter3_regex'] = 'filter3*'
-
-    ops['var_filter_key'] = {'G': 'filter1', 'R': 'filter2'}
-    ops['is_photostim'] = True
-    return ops
-
-def ChRmine_BGR_ops(**kwargs):
-    ops = default_ops(imaging=True, env='tmaze', maze='cued_tmaze', **kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= 'filter2*'
-    ops['filter3_regex'] = 'filter3*'
-    ops['var_filter_key'] = {'B': 'filter3', 'G': 'filter1', 'R': 'filter2'}
-
-    ops['is_photostim'] = False
-    return ops
-
-def ChRmine_BGR_ops2(**kwargs):
-    ops = default_ops(imaging=True, env='tmaze', maze='cued_tmaze', **kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= 'filter2*'
-    ops['filter3_regex'] = 'filter3*'
-    ops['var_filter_key'] = {'B': 'filter3', 'G': 'filter2', 'R': 'filter2_demixed'}
-    ops['process_fcn'] = 'process_ChRmine_Sst44nlsBFP'
-
-    ops['is_photostim'] = False
-
-    ops['n_top_B'] = 3
-    ops['n_top_R'] = 3
-    ops['min_R_rel'] = 0.1
-    ops['min_B_rel'] = 0.15
-    ops['min_R_spatial_corr'] = 0.6
-    
-    return ops
-
-def ChRmine_BGR_stim_ops(**kwargs):
-    ops = default_ops(imaging=True, env='tmaze', maze='cued_tmaze', **kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= 'filter2*'
-    ops['filter3_regex'] = 'filter3*'
-    ops['var_filter_key'] = {'B': 'filter3', 'G': 'filter2', 'R': 'filter2_demixed'} # JG 220126: changed {'G': 'filter1'} to {'G': 'filter2'} to detect high G bleedthrough into R
-    ops['process_fcn'] = 'process_ChRmine_Sst44nlsBFP'
-
-    ops['is_photostim'] = True
-    ops['slm_photostim'] = True
-
-    ops['n_top_B'] = 3
-    ops['n_top_R'] = 3
-    ops['min_R_rel'] = 0.1
-    ops['min_B_rel'] = 0.15
-    ops['min_R_spatial_corr'] = 0.6
-    return ops
-
-def ChRmine_BGR_maximin_stim_ops(**kwargs):
-    ops = ChRmine_BGR_stim_ops()
-    ops['baseline'] = 'maximin'
-    return ops
-
-def ChRmine_BGR_darkstim_ops(**kwargs):
-    ops = default_ops(imaging=True, env=None, maze=None, **kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= 'filter2*'
-    ops['filter3_regex'] = 'filter3*'
-    ops['var_filter_key'] = {'B': 'filter3', 'G': 'filter1', 'R': 'filter2'}
-
-    ops['is_photostim'] = True
-    ops['slm_photostim'] = True
-    return ops
-
-def ChRmine_BGR_darkstim_galvo_ops(**kwargs):
-    ops = default_ops(imaging=True, env=None, maze=None, **kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= 'filter2*'
-    ops['filter3_regex'] = 'filter3*'
-    ops['var_filter_key'] = {'B': 'filter3', 'G': 'filter1', 'R': 'filter2'}
-
-    ops['is_photostim'] = True
-    ops['slm_photostim'] = False
-    return ops
-
-def Sst44nlsBFP_ops(**kwargs):
-    ops = default_ops(**kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex'] = ['filter2_60mW*', 'filter2_25pct*', 'filter2_30pct*', 'filter2_30mW*', 'filter2*']
-    ops['var_filter_key'] = {'B': 'filter2_demixed', 'G': 'filter2'}
-
-    ops['is_photostim'] = False
-    return ops
-
-def SstCreRFP_Sst44nlsBFP_ops(**kwargs):
-    ops = default_ops(**kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex'] = ['filter2_60mW*', 'filter2_30mW*', 'filter2_25pct*', 'filter2_30pct*', 'filter2*']
-
-    ops['var_filter_key'] = {'B': 'filter2', 'G': 'filter2', 'R': 'filter1'}
-    ops['process_fcn'] = 'process_SstCreRFP_Sst44nlsBFP'
-
-    ops['top_n_R'] = 3
-    ops['min_R_rel'] = 0.15
-    ops['top_n_B'] = 3
-    ops['min_B_rel'] = 0.15
-    ops['min_R_spatial_corr'] = 0.7
-
-    return ops
-
-def SstCreRFP_Sst44nlsBFP_dark_ops(**kwargs):
-    ops = default_ops(imaging=True, env=None, maze=None, **kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex'] = ['filter2_60mW*', 'filter2_30mW*', 'filter2_25pct*', 'filter2_30pct*', 'filter2*']
-
-    ops['var_filter_key'] = {'B': 'filter2_demixed', 'G': 'filter2', 'R': 'filter1'}
-    ops['process_fcn'] = 'process_SstCreRFP_Sst44nlsBFP'
-
-    ops['top_n_R'] = 3
-    ops['min_R_rel'] = 0.15
-    ops['top_n_B'] = 3
-    ops['min_B_rel'] = 0.15
-    ops['min_R_spatial_corr'] = 0.7
-    return ops
-
-def SstCreRFP_Sst44nlsBFP_playback_ops(**kwargs):
-    ops = SstCreRFP_Sst44nlsBFP_ops(**kwargs)
-    ops['is_vr_playback'] = True
-    return ops
-
-def SstCreRFP_Sst44nlsBFP_cueswitch_ops(**kwargs):
-    ops = SstCreRFP_Sst44nlsBFP_ops(**kwargs)
-    ops['maze'] = 'cue_switch'
-    ops['do_median_trajectory'] = False
-    return ops
-
-def SstCreRFP_Sst44nlsBFP_newcue_ops(**kwargs):
-    ops = SstCreRFP_Sst44nlsBFP_ops(**kwargs)
-    ops['do_median_trajectory'] = False
-    return ops
-
-def SstCreRFP_Sst44nlsBFP_linearMaze_ops(**kwargs):
-    ops = SstCreRFP_Sst44nlsBFP_ops(**kwargs)
-    ops['env'] = None
-    ops['maze'] = None
-    ops['do_median_trajectory'] = False
-    return ops
-
-def Sst44nlsBFP_Lamp5nlsRFP_ops(**kwargs):
-    ops = default_ops(**kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= ['filter2_60mW*', 'filter2_30mW*', 'filter2*']
-    ops['filter3_regex'] = 'filter3*'
-
-    ops['var_filter_key'] = {'B': 'filter3_demixed_reg', 'G': 'filter3_demixed_reg', 'R': 'filter2_reg'}
-    # ops['maze'] = 'half_black_half_white'
-    return ops
-
-def Lamp5nlsRFP_ops(**kwargs):
-    ops = default_ops(**kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= 'filter2*'
-    ops['filter3_regex'] = None
-
-    ops['var_filter_key'] = {'G': 'filter1', 'R': 'filter2'}
-    return ops
-
-def Lamp5nlsRFP_nofilter2_ops(**kwargs):
-    ops = default_ops(**kwargs)
-    ops['filter1_regex'] = 'filter1'
-    ops['filter2_regex']= None
-    ops['filter3_regex'] = None
-
-    ops['var_filter_key'] = {'G': 'filter1', 'R': 'filter1_demixed'}
     return ops
 
 import numpy as np

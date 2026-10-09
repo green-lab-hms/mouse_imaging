@@ -12,10 +12,12 @@ from ScanImageTiffReader import ScanImageTiffReader
 from mouse_imaging import functions as fc
 from mouse_imaging import options
 
+
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 import importlib
+importlib.reload(options)
 
 regex_1filter = "^[BGR]\d$"
 regex_2filters = "^[BGR]\d[BGR]\d$"
@@ -72,6 +74,8 @@ def parse_si_filename(si_tif, functional_filter='G'):
     return metadata
 
 def get_metadata(path, functional_filter='G', recompute=False, update=True):
+    assert (path['raw_image1_tif'] is not None) and path['raw_image1_tif'].is_file()
+
     if os.path.isfile(path['metadata_pickle']) and ( (not recompute) or update):
         metadata = fc.load_pickle(path['metadata_pickle'])
         if update:
@@ -103,56 +107,47 @@ def get_metadata(path, functional_filter='G', recompute=False, update=True):
             filters = [metadata[filterx]['filter_id'] for filterx in filterxs]
             return filters
 
-        def parse_pmt_gain(pmt_gain_txt, prefix): # deprecated
-            if os.path.isfile(pmt_gain_txt):
-                with open(pmt_gain_txt, 'r') as fh:
-                    pmt_gain_txt = fh.read()
-                pmt_gain = {prefix + '_' + line.split(': ')[0]: float(line.split(': ')[1]) for line in pmt_gain_txt.strip().split('\n')}
-            else:
-                pmt_gain = {prefix + '_ch1': np.nan, prefix + '_ch2': np.nan}
-            return pmt_gain
+        # def filterx_filename(path, filterx):
+        #     filter_keys_raw = [key for key in path['meanRef'].keys() if not key[-8:]=='demixed']
+        #     for filter_key in filter_keys_raw:
+        #         files = path['meanRef'][filter_key]
+        #         if filterx in files[0]:
+        #             return files[0]
 
-        def filterx_filename(path, filterx):
-            filter_keys_raw = [key for key in path['meanRef'].keys() if not key[-8:]=='demixed']
-            for filter_key in filter_keys_raw:
-                files = path['meanRef'][filter_key]
-                if filterx in files[0]:
-                    return files[0]
+        def n_saved_channels(metadata):
+            val = metadata['SI.hChannels.channelSave']
+            if isinstance(val, float):          # single channel, e.g. '1' -> 1.0
+                return 1
+            return len(val.strip('[]').replace(';', ' ').split())   # e.g. '[1;2]'
+
+        
         
         metadata = {}
-        if (path['raw_image1_tif'] is not None) and glob.glob(path['raw_image1_tif']):
-            filter1_tif = path['raw_image1_tif']
-            # Parse ScanImage metadata within tif file
-            img = ScanImageTiffReader(filter1_tif)
-            metadata['scanimage_str'] = img.metadata()
-            metadata.update(parse_si_metadata(img.metadata()))
-            metadata.update(parse_si_path(filter1_tif))
-            metadata['is_photostim'] = metadata['RoiGroups']['photostimRoiGroups'] is not None
+        
+        filter1_tif = str(path['raw_image1_tif'])
+        # Parse ScanImage metadata within tif file
+        img = ScanImageTiffReader(str(filter1_tif))
+        # metadata['scanimage_str'] = img.metadata()
+        metadata.update(parse_si_metadata(img.metadata()))
+        metadata.update(parse_si_path(filter1_tif))
+        metadata['is_photostim'] = metadata['RoiGroups']['photostimRoiGroups'] is not None
 
-            # Make some useful parameters more easily accessible
-            metadata['nslices'] = int(metadata['SI.hStackManager.numSlices'])
-            metadata['Ly'] = int(metadata['SI.hRoiManager.linesPerFrame'])
-            metadata['Lx'] = int(metadata['SI.hRoiManager.pixelsPerLine'])
-            metadata['volume_rate'] = float(metadata['SI.hRoiManager.scanVolumeRate'])
-            metadata['dt'] = 1. / metadata['volume_rate']
-        else:
-            filter1_tif = filterx_filename(path, 'filter1')
+        # Make some useful parameters more easily accessible
+        metadata['nslices'] = int(metadata['SI.hStackManager.actualNumSlices'])
+        metadata['nchannels'] = n_saved_channels(metadata)
+        metadata['Ly'] = int(metadata['SI.hRoiManager.linesPerFrame'])
+        metadata['Lx'] = int(metadata['SI.hRoiManager.pixelsPerLine'])
+        metadata['volume_rate'] = float(metadata['SI.hRoiManager.scanVolumeRate'])
+        metadata['dt'] = 1. / metadata['volume_rate']
+        metadata['nflyback'] = int(metadata['SI.hFastZ.numDiscardFlybackFrames'])
+        
         metadata['filter1'] = parse_si_filename(filter1_tif, functional_filter)
         metadata['region'] = metadata['filter1']['region']
         
         # Parse metadata from filter2, if present
-        filter2_tif = filterx_filename(path, 'filter2')
-        if filter2_tif:
-            metadata['filter2'] = parse_si_filename(filter2_tif, functional_filter)
-
-        # Parse metadata from filter3, if present
-        filter3_tif = filterx_filename(path, 'filter3')
-        if filter3_tif:
-            metadata['filter3'] = parse_si_filename(filter3_tif, functional_filter)
-
-        # PMT gain (deprecated)
-        # metadata.update(parse_pmt_gain(path['filter2_pmt_gain_txt'], prefix='filter2_pmt_gain'))
-        # metadata.update(parse_pmt_gain(path['pmt_gain_txt'], prefix='pmt_gain'))
+        # filter2_tif = filterx_filename(path, 'filter2')
+        # if filter2_tif:
+        #     metadata['filter2'] = parse_si_filename(filter2_tif, functional_filter)
 
         # Get channels that are available
         metadata['available_channels'] = available_channels(metadata)
@@ -187,157 +182,44 @@ def update_metadata(adata):
         path = adata.uns['path']
     adata.uns['metadata'] = get_metadata(path)
 
-def define_path(session_dir=None, mouse=None, date=None, session='session_1', ops=options.default_ops(), makedir=False, recompute=False, update=True):
-    if session_dir is not None:
-        mouse, date, session = session_dir.rstrip(os.path.sep).split(os.path.sep)[-3:]
-        assert date.isnumeric()
-
-    # Look for session in different possible roots
-    root = ''
-    for root_i in ops['preprocessed_root']:
-        preprocessed_dir_i = os.path.join(root_i, mouse, date, session)
-        if os.path.isdir(preprocessed_dir_i):
-            root = root_i
-    if not root:
-        root = ops['preprocessed_root'][0]
-
+def define_path(mouse=None, date=None, session='session_1', ops=options.default_ops(), makedir=False, recompute=False, update=True):        
     path = {}
     # Preprocessed output
-    path['code_dir'] = f"/home/{ops['user']}/code"
-    path['preprocessed_root'] = root
-    path['preprocessed_dir'] = os.path.join(root, mouse, date, session)
-    path['path_pickle'] = os.path.join(path['preprocessed_dir'], 'path.pickle')
-    if os.path.isfile(path['path_pickle']) and ( (not recompute) or update):
-        path = fc.load_pickle(path['path_pickle'])
-        if update:
-            path_new = define_path(session_dir=session_dir, mouse=mouse, date=date, session=session, ops=ops, makedir=makedir, recompute=True, update=False)
-            path.update(path_new)
-            return path
+    path['code_dir'] = ops['code_dir']
+    path['raw_root'] = ops['raw_root']
+    path['preprocessed_root'] = ops['preprocessed_root']
+    path['preprocessed_dir'] = path['preprocessed_root'] / mouse / date / session
 
     # Virmen path
-    path['virmen_mat'] = os.path.join(path['preprocessed_dir'], 'virmen', 'sessionData.mat')
-    path['maze_id_txt'] = os.path.join(path['preprocessed_dir'],  'virmen', 'maze_id.txt')
-    path['frameGrabs_dir'] = os.path.join(path['preprocessed_dir'], 'virmen', 'frameGrabs',)
-    path['frameGrabs_mat'] = os.path.join(path['preprocessed_dir'], 'virmen', 'frameGrabs', 'Trial#{trial}.mat')
+    path['virmen_dir'] = path['raw_root'] / 'virmen' / mouse / date / session
+    path['virmen_mat'] = path['virmen_dir'] / 'sessionData.mat'
+    path['maze_id_txt'] = path['virmen_dir'] / 'maze_id.txt'
+    path['frameGrabs_dir'] = path['virmen_dir'] / 'frameGrabs'
+    path['frameGrabs_mat'] = path['frameGrabs_dir'] / f'Trial{{trial}}.mat'
 
+    # Two-photon and sync paths
     if ops['imaging']:
-        path['raw_root'] = ops['raw_root']
-
-        # 2P path
-        if session_dir is None:
-            raw2P_root = os.path.join(ops['raw_root'], '2P')
-        else:
-            raw2P_root = '/' + os.path.join(*session_dir.rstrip(os.path.sep).split(os.path.sep)[:-3])
-        path['raw2P_dir'] = os.path.join(raw2P_root, mouse, date, session)
-        path['corrected_dir'] = os.path.join(path['raw2P_dir'], 'Corrected')
-        raw_tifs = glob.glob(os.path.join(path['raw2P_dir'], '*.tif'))
-        
-        if raw_tifs: 
-            path['raw_image1_tif'] = raw_tifs[0]
-        else:
-            raw_tifs = glob.glob(os.path.join(path['preprocessed_dir'], '2P', 'session_*_00001.tif'))
-            if raw_tifs:
-                path['raw_image1_tif'] = raw_tifs[0]
-            else:
-                path['raw_image1_tif'] = None
-
-        # path['pmt_gain_txt'] = os.path.join(path['raw2P_dir'], 'pmt_gain.txt')    
-        # path['filter2_pmt_gain_txt'] = os.path.join(path['raw2P_dir'], 'filter2', 'pmt_gain.txt')
-        
+    # Two-photon path
+        path['twophoton_dir'] = path['raw_root'] / 'twophoton' / mouse / date / session
+        raw_tifs = sorted(list(path['twophoton_dir'].glob('*.tif')))
+        path['raw_image1_tif'] = raw_tifs[0] if raw_tifs else None
+            
         # Sync path
-        sync_file_glob = glob.glob(os.path.join(path['preprocessed_dir'], 'sync', 'session_%04d.*' %int(session.split('_')[-1])))
-        if len(sync_file_glob):
-            path['sync'] = sync_file_glob[0]
-        path['metadata_pickle'] = os.path.join(path['preprocessed_dir'], 'metadata.pickle')
-        path['session_pickle'] = os.path.join(path['preprocessed_dir'], 'session.pickle')
-
-        baseline = ops['baseline']
-        path['adata_legacy_h5ad'] = os.path.join(path['preprocessed_dir'], 'adata.h5ad')
-        path['adata_allsources_legacy_h5ad'] = os.path.join(path['preprocessed_dir'], 'adata.h5ad')
-        path['adata_h5ad'] = os.path.join(path['preprocessed_dir'], f'adata_{baseline}.h5ad')
-        path['adata_h5ad_backup'] = os.path.join(path['preprocessed_dir'], f'adata_{baseline}.h5ad.backup')
-        path['adata_allsources_h5ad'] = os.path.join(path['preprocessed_dir'], f'adata_allsources_{baseline}.h5ad')
-        path['adata_allsources_reg_h5ad'] = os.path.join(path['preprocessed_dir'], f'adata_allsources_{baseline}.h5ad')
-        path['var_pickle'] = os.path.join(path['preprocessed_dir'], 'var.pickle')
-
-        def define_filter_path(path, filter_regex):
-            path = path.copy()
-
-            if filter_regex is None: 
-                return path
-            
-            # Loop through filter_regex possibilities
-            if type(filter_regex) is str:
-                filter_regex = [filter_regex]
-            filter_dir = None
-            for regexi in filter_regex:
-                filter_dirs = sorted(glob.glob(os.path.join(path['preprocessed_dir'], 'meanRef', regexi)))
-                if filter_dirs:
-                    filter_dir = filter_dirs[0]
-            
-            if filter_dir is None:
-                print('Could not find filter matching "{filter_regex}".')
-                return path
-
-            raw_files = sorted(glob.glob(os.path.join(filter_dir, '*.tiff')))
-            if raw_files:
-                
-                filter_key = os.path.basename(filter_dir).split('_')[0]
-                suffixes = [filei.split('_mean')[-1].split('.tiff')[0] for filei in raw_files]
-                for suffix in suffixes:
-                    path['meanRef'][filter_key + suffix] = sorted(glob.glob(os.path.join(filter_dir, f'*mean{suffix}.tiff')))
-
-            return path
+        path['sync_dir'] = path['raw_root'] / 'sync' / mouse / date
+        sync_files = list(path['sync_dir'].glob(f"session_{int(session.split('_')[-1]):03d}.*"))
+        path['sync'] = sync_files[0] if sync_files else None
         
-        path['meanRef'] = {}
-        path = define_filter_path(path, ops['filter1_regex'])
-        path = define_filter_path(path, ops['filter2_regex'])
-        path = define_filter_path(path, ops['filter3_regex'])
-
-        # Previous way of parsing filters
-        # path['compositeMeanRef_tif'] = os.path.join(path['preprocessed_dir'], 'meanRef', 'raw', 'compositeMeanRef_{filter_id}_slice0{plane}.tiff')
-        # path['compositeMeanRef_demixed_tif'] = os.path.join(path['preprocessed_dir'], 'meanRef', 'demixed', 'compositeMeanRef_{filter_id}_slice0{plane}.tiff')
+        path['metadata_pickle'] = path['preprocessed_dir'] / 'metadata.pickle'
+        path['session_pickle'] = path['preprocessed_dir'] / 'session.pickle'
+        path['adata_h5ad'] = path['preprocessed_dir'] / f'adata.h5ad'
+        path['adata_h5ad_backup'] = path['preprocessed_dir'] / f'adata.h5ad.backup'
+        path['adata_allsources_h5ad'] = path['preprocessed_dir'] / f'adata_allsources.h5ad'
         
         # Suite2p output
-        suite2p_out = os.path.join(path['preprocessed_dir'], 'slice_{plane}', 'plane0')
-        path['F_npy'] = os.path.join(suite2p_out, 'F.npy')
-        path['spks_npy'] = os.path.join(suite2p_out, 'spks.npy')
-        path['Fneu_npy'] = os.path.join(suite2p_out, 'Fneu.npy')
-        path['iscell_npy'] = os.path.join(suite2p_out, 'iscell.npy')
-        path['Fbkg_npy'] = os.path.join(suite2p_out, 'Fbkg.npy')
-        path['ops_npy'] = os.path.join(suite2p_out, 'ops.npy')
-        path['stat_npy'] = os.path.join(suite2p_out, 'stat.npy')
+        path['suite2p_dir'] = path['preprocessed_dir'] / 'suite2p'
 
-        # OASIS input / output
-        path['Fc_mat'] = os.path.join(suite2p_out, f'Fc_{baseline}.mat')
-        path['Fc_oasis_mat'] = os.path.join(suite2p_out, f'Fc_{baseline}_oasis.mat')
-
-        # Convnet source classifier
-        path['source_images_mat'] = os.path.join(suite2p_out, 'source_images.mat')
-        path['convnet_labels_csv'] = os.path.join(suite2p_out, 'convnet_labels.csv')
-        path['iscell_convnet_npy'] = os.path.join(suite2p_out, 'iscell_convnet.npy')
-        path['convnet_mat'] = ops['convnet_mat']
-
-        # Cellpose
-        path['cellpose'] = {}
-        for filter_key in sorted(path['meanRef'].keys()):
-            files = path['meanRef'][filter_key]
-            meanref_dir = os.path.dirname(files[0])
-            cellpose_dir = os.path.join(meanref_dir, 'cellpose')
-            cellpose_seg_files_exist = glob.glob(os.path.join(cellpose_dir, 'chan*', '*seg.npy'))
-            if cellpose_seg_files_exist:
-                path['cellpose'][filter_key] = {}
-                for channel_dir in glob.glob(os.path.join(cellpose_dir, 'chan*')):
-                    channel = 'chan' + channel_dir[-1]
-                    path['cellpose'][filter_key][channel] = sorted(glob.glob(os.path.join(channel_dir, '*seg.npy')))
-
-        # path['cellpose_seg_npys'] = os.path.join(path['meanRef'][filter_id], 'cellpose', '{filter_id}', 'chan{channel}', 'compositeMeanRef_{filter_id}_slice0{plane}_seg.npy')
-
-        # Photostim frames
-        path['photostim_frames'] = os.path.join(path['preprocessed_dir'], 'photostim', 'photostim_frames_{condition}.mat')
     if makedir:
         os.makedirs(path['preprocessed_dir'], exist_ok=True)
-        os.makedirs(os.path.join(path['preprocessed_dir'], 'photostim'), exist_ok=True)
 
     return path
 
